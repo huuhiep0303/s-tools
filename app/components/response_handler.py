@@ -174,8 +174,12 @@ class ResponseHandler:
                 if not reason:
                     return "Ban nội bộ đã nhận yêu cầu rời tổ chức của bạn. Bạn có thể chia sẻ thêm lý do để ban nắm được không?"
             elif cat in ("training_leave", "meeting_leave"):
+                if not has_date and not reason:
+                    return "Ban nội bộ đã nhận yêu cầu xin nghỉ của bạn. Bạn vui lòng bổ sung thêm ngày tháng cụ thể và lý do nghỉ nhé!"
                 if not has_date:
                     return "Ban nội bộ đã nhận yêu cầu xin nghỉ của bạn. Bạn vui lòng bổ sung thêm ngày tháng cụ thể nhé!"
+                if not reason:
+                    return "Ban nội bộ đã nhận yêu cầu xin nghỉ của bạn. Bạn vui lòng bổ sung thêm lý do xin nghỉ nhé!"
         return (
             "Xin lỗi, ban nội bộ chưa hiểu rõ yêu cầu của bạn. "
             "Bạn có thể cho biết mình muốn: nghỉ đào tạo, nghỉ họp, tạm dừng, hay rời tổ chức? "
@@ -183,7 +187,7 @@ class ResponseHandler:
         )
 
     def _format_admin_notification(self, data: dict) -> str:
-        sender = data.get("senderId", "")
+        sender = data.get("senderName") or data.get("senderId", "")
         ts = data.get("timestamp", "")
         content = data.get("messageContent", "")
         return f"⚠️ Tin nhắn cần xem xét thủ công từ {sender} lúc {ts}: {content}"

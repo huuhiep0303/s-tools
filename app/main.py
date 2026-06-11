@@ -159,10 +159,12 @@ async def process_message(message_data: dict):
                 "reason": classification.reason
             })
             
+            profile_name = await handler.get_user_profile_name(sender_id)
             # Notify admins
             await handler.send_admin_notification({
                 "messageContent": content,
                 "senderId": sender_id,
+                "senderName": profile_name,
                 "timestamp": timestamp
             })
             
@@ -207,8 +209,13 @@ async def process_message(message_data: dict):
             logger.log_info("Main", "process_message", "→ Step 4: Processing leave request", {"senderId": sender_id})
             
             # Check for missing info
-            if not classification.date and not classification.date_range:
-                assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category})
+            if not (classification.date or classification.date_range) or not classification.reason:
+                assistant_reply = await handler.send_clarification_request(sender_id, {
+                    "category": classification.category,
+                    "date": classification.date,
+                    "date_range": classification.date_range,
+                    "reason": classification.reason
+                })
                 history.append({"role": "assistant", "content": assistant_reply})
                 await save_session(sender_id, history)
                 return
@@ -273,7 +280,18 @@ async def process_message(message_data: dict):
                 # E.g. member not found or invalid transition
                 logger.log_error("Main", "process_message", "Failed to update status", {"error": e})
                 assistant_reply = "Xin lỗi, đã có lỗi xảy ra khi cập nhật trạng thái của bạn. Ban nội bộ sẽ kiểm tra lại nhé."
-                await handler.send_clarification_request(sender_id) # Using default vague message 
+                await handler.send_confirmation(sender_id, "error", {})
+                # Record failure and save session, then return early
+                await sheet_manager.record_history({
+                    "timestamp": timestamp,
+                    "facebookId": sender_id,
+                    "requestType": classification.category,
+                    "confidence": classification.confidence,
+                    "status": "failed"
+                })
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                return
         
         else:
             assistant_reply = await handler.send_clarification_request(sender_id)
