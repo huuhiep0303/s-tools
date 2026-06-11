@@ -58,7 +58,7 @@ Hãy thực hiện ĐỒNG THỜI 2 việc:
    Ví dụ: Nếu lịch sử cho thấy user xin nghỉ đào tạo nhưng thiếu ngày, và tin nhắn mới chỉ là "ngày 5/6" → category vẫn là training_leave.
 
 2. TRÍCH XUẤT thông tin (dựa trên cả lịch sử và tin nhắn hiện tại):
-   - reason: lý do của yêu cầu (tối đa 500 ký tự, chuỗi rỗng nếu không có)
+   - reason: lý do cụ thể của yêu cầu (ví dụ: bị ốm, bận thi, về quê...). NẾU USER CHƯA NÊU LÝ DO CỤ THỂ, BẮT BUỘC PHẢI TRẢ VỀ CHUỖI RỖNG (""). KHÔNG lấy hành động "xin nghỉ" làm lý do.
    - date: ngày đơn lẻ dạng YYYY-MM-DD, hoặc null
    - dateRange: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"} nếu có khoảng thời gian, hoặc null
 
