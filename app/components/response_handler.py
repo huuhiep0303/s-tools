@@ -147,9 +147,11 @@ class ResponseHandler:
             "quit_membership":
                 "Ban nội bộ đã ghi nhận thông tin xin rời tổ chức của bạn. Cảm ơn bạn vì khoảng thời gian đồng hành cùng SGroup!",
             "bot_identity":
-                "Chào bạn, mình là thành viên Ban Nội Bộ SGroup. Mình ở đây để giúp bạn giải quyết các vấn đề liên quan đến nhân sự như xin nghỉ (đào tạo/họp), tạm dừng hoạt động hoặc rời tổ chức. Bạn cần mình hỗ trợ gì nào?",
+                "Chào bạn, mình là thành viên Ban Nội Bộ S-Group. Mình ở đây để giúp bạn giải quyết các vấn đề liên quan đến nhân sự như xin nghỉ (đào tạo/họp), tạm dừng hoạt động hoặc rời tổ chức. Bạn cần mình hỗ trợ gì nào?",
             "greeting":
-                "Chào bạn, mình là thành viên Ban Nội Bộ SGroup. Mình có thể giúp gì cho bạn hôm nay?",
+                "Chào bạn, mình là thành viên Ban Nội Bộ S-Group. Mình có thể giúp gì cho bạn hôm nay?",
+            "thanks":
+                "Ok bạn nha. Nếu cần hỗ trợ gì thêm cứ nhắn mình nha.",
         }
         return switch.get(
             category,

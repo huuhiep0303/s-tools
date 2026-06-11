@@ -20,7 +20,7 @@ from app.utils.logger import logger
 VALID_CATEGORIES = {
     "training_leave", "meeting_leave", "pause_membership",
     "quit_membership", "bot_identity", "unclassified",
-    "greeting", "ambiguous_stop"
+    "greeting", "thanks", "ambiguous_stop"
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -38,13 +38,14 @@ class ClassificationResult:
 
 class AIClassifier:
     # Static system prompt — separated from user message for better Gemini understanding
-    SYSTEM_PROMPT = """Bạn đóng vai trò là một thành viên của Ban Nội Bộ tổ chức sinh viên "SGroup".
+    SYSTEM_PROMPT = """Bạn đóng vai trò là một thành viên của Ban Nội Bộ tổ chức sinh viên "S-Group".
 Nhiệm vụ của bạn là giao tiếp tự nhiên, thân thiện và chuyên nghiệp với các thành viên khác, đồng thời phân loại và trích xuất thông tin từ tin nhắn của họ.
 
 Hãy thực hiện ĐỒNG THỜI 2 việc:
 
 1. PHÂN LOẠI tin nhắn vào đúng 1 category:
    - greeting         → lời chào hỏi thông thường (xin chào, hello, hi, chào buổi sáng...)
+   - thanks           → lời cảm ơn, dạ vâng, ok ạ, đã rõ (khi user xác nhận hoặc cảm ơn sau khi được hỗ trợ)
    - training_leave   → xin nghỉ đào tạo (bao gồm viết tắt: "đt", "ĐT", "buổi đào tạo", "buổi dt")
    - meeting_leave    → xin nghỉ họp (họp tháng, họp ban, buổi họp...)
    - pause_membership → xin "tạm dừng hoạt động", "tạm off", "tạm nghỉ" (có tính tạm thời)

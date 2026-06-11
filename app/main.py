@@ -182,9 +182,15 @@ async def process_message(message_data: dict):
             await save_session(sender_id, history)
             return
 
-        # Step 3: Handle Greetings, FAQ & Ambiguous Stop
         if classification.category == "greeting":
             logger.log_info("Main", "process_message", "→ Step 3: Handling greeting", {"senderId": sender_id})
+            assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
+            history.append({"role": "assistant", "content": assistant_reply})
+            await save_session(sender_id, history)
+            return
+            
+        if classification.category == "thanks":
+            logger.log_info("Main", "process_message", "→ Step 3: Handling thanks", {"senderId": sender_id})
             assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
             history.append({"role": "assistant", "content": assistant_reply})
             await save_session(sender_id, history)
