@@ -20,7 +20,7 @@ from app.utils.logger import logger
 VALID_CATEGORIES = {
     "training_leave", "meeting_leave", "pause_membership",
     "quit_membership", "bot_identity", "unclassified",
-    "greeting", "thanks", "ambiguous_stop"
+    "greeting", "thanks", "ambiguous_stop", "faq", "onboarding"
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -52,6 +52,8 @@ Hãy thực hiện ĐỒNG THỜI 2 việc:
    - quit_membership  → xin "rời tổ chức", "nghỉ hẳn", "dừng hoạt động hẳn", "out" (vĩnh viễn)
    - ambiguous_stop   → "xin dừng hoạt động" chung chung, không rõ là tạm thời hay vĩnh viễn
    - bot_identity     → hỏi bạn là ai / vai trò của bạn / bot dùng để làm gì
+   - faq              → hỏi đáp về các quy định, nội quy, giờ giấc, tiền quỹ, xử phạt, hoặc thắc mắc chung về S-Group
+   - onboarding       → hỏi cách tham gia S-Group, cách hoạt động, các câu hỏi của người mới
    - unclassified     → không rõ / không khớp category nào ở trên
 
    LƯU Ý QUAN TRỌNG VỀ NGỮ CẢNH HỘI THOẠI:
@@ -160,6 +162,32 @@ Hướng dẫn confidence:
                 reason="", date=None, date_range=None, manual_review=True,
             )
 
+    async def answer_faq(self, question: str, context: str, history: list) -> str:
+        """Generate a natural language answer to an FAQ using the provided context."""
+        prompt = self._build_faq_prompt(question, context, history)
+        try:
+            # We use a simple retry wrapper for rate limits
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    response_text = await asyncio.wait_for(
+                        asyncio.to_thread(self._gemini_generate, prompt),
+                        timeout=self.timeout,
+                    )
+                    return response_text.strip()
+                except asyncio.TimeoutError:
+                    raise TimeoutError(f"Gemini timeout after {self.timeout}s")
+                except Exception as exc:
+                    error_str = str(exc)
+                    if "429" in error_str or "quota" in error_str.lower():
+                        delay = self.retry_base_delay * (2 ** (attempt - 1))
+                        if attempt < self.max_retries:
+                            await asyncio.sleep(delay)
+                            continue
+                    raise RuntimeError(f"Gemini error: {exc}") from exc
+        except Exception as exc:
+            logger.log_error("AI_Classifier", "answer_faq", "FAQ generation failed", {"error": exc})
+            return "Xin lỗi, hiện tại mình không thể trả lời câu hỏi này. Bạn vui lòng liên hệ trực tiếp Ban Nội Bộ nhé!"
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -218,6 +246,27 @@ Hướng dẫn confidence:
 
         user_parts.append(f"Phân loại và trích xuất thông tin từ tin nhắn MỚI này:\n\n{content}")
         return "\n".join(user_parts)
+
+    def _build_faq_prompt(self, question: str, context: str, history: list) -> str:
+        """Build the prompt for answering FAQs using the knowledge base."""
+        parts = [
+            "Bạn là một trợ lý ảo của Ban Nội Bộ S-Group. Hãy dựa vào TÀI LIỆU NỘI QUY dưới đây để trả lời câu hỏi của thành viên một cách thân thiện, ngắn gọn và dễ hiểu.",
+            "Tuyệt đối KHÔNG tự bịa ra thông tin ngoài tài liệu. Nếu câu hỏi không có trong tài liệu, hãy trả lời: 'Xin lỗi, mình chưa có thông tin về vấn đề này. Bạn có thể hỏi trực tiếp Ban Nội Bộ nhé!'",
+            "\n--- TÀI LIỆU NỘI QUY S-GROUP ---",
+            context,
+            "-----------------------------------\n"
+        ]
+        
+        if history:
+            parts.append("Lịch sử hội thoại:")
+            for msg in history:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                parts.append(f"{role}: {msg.get('content', '')}")
+            parts.append("")
+            
+        parts.append(f"Câu hỏi mới của User: {question}")
+        parts.append("Câu trả lời của bạn:")
+        return "\n".join(parts)
 
     def _parse_combined(self, response: str) -> dict:
         try:

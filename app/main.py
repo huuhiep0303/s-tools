@@ -8,7 +8,12 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+from datetime import datetime
+from pydantic import BaseModel
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # Load environment variables if not already set (for local dev)
 load_dotenv()
@@ -19,6 +24,7 @@ from app.components.response_handler import ResponseHandler
 from app.components.sheet_manager import SheetManager
 from app.database.connection import connect_db, disconnect_db
 from app.database.models import ensure_indexes, get_session, save_session
+from app.jobs.scheduler import JobScheduler
 from app.utils.logger import logger
 
 # Global component instances
@@ -26,6 +32,7 @@ classifier = AIClassifier()
 receiver = FacebookReceiver()
 handler = ResponseHandler()
 sheet_manager = SheetManager()
+scheduler = JobScheduler(sheet_manager, handler)
 
 
 @asynccontextmanager
@@ -44,22 +51,89 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.log_error("Main", "startup", "Failed to initialize SheetManager", {"error": exc})
         # We don't fail startup, but log it. Next request might fail or trigger re-init.
+        
+    scheduler.start()
     
     yield
     
     # Shutdown
     logger.log_info("Main", "shutdown", "Shutting down system")
+    scheduler.stop()
     await disconnect_db()
 
 
 # Initialize FastAPI app
 app = FastAPI(title="Facebook AI Member Management", lifespan=lifespan)
 
+# Add CORS middleware for frontend communication
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this in production to specific domains
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+# ------------------------------------------------------------------
+# Admin Dashboard API Endpoints
+# ------------------------------------------------------------------
+
+@app.get("/api/v1/dashboard")
+async def get_dashboard():
+    """Get dashboard statistics."""
+    stats = await sheet_manager.get_dashboard_stats()
+    return stats
+
+@app.get("/api/v1/members")
+async def get_members():
+    """Get all members."""
+    members = await sheet_manager.get_members()
+    return members
+
+@app.get("/api/v1/manual-reviews")
+async def get_manual_reviews():
+    """Get manual review queue."""
+    reviews = await sheet_manager.get_manual_reviews()
+    return reviews
+
+@app.get("/api/v1/history")
+async def get_history():
+    """Get recent request history."""
+    history = await sheet_manager.get_recent_requests()
+    return history
+
+class ResolveReviewRequest(BaseModel):
+    finalCategory: str
+
+@app.post("/api/v1/manual-reviews/{record_id}/resolve")
+async def resolve_manual_review(record_id: str, req: ResolveReviewRequest):
+    """Resolve a manual review and send confirmation."""
+    try:
+        review_data = await sheet_manager.resolve_manual_review(record_id, req.finalCategory)
+        
+        await sheet_manager.record_history({
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "facebookId": review_data["senderId"],
+            "requestType": req.finalCategory,
+            "confidence": 1.0,
+            "status": "success"
+        })
+        
+        msg = handler._format_confirmation(req.finalCategory, {})
+        await handler.send_direct_message(review_data["senderId"], msg)
+        
+        await sheet_manager.update_dashboard()
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.log_error("Main", "resolve_manual_review", "Error", {"error": exc})
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/webhook")
@@ -210,6 +284,33 @@ async def process_message(message_data: dict):
             await save_session(sender_id, history)
             return
             
+        if classification.category in ["faq", "onboarding"]:
+            logger.log_info("Main", "process_message", "→ Step 3: Handling FAQ/Onboarding (RAG)", {"senderId": sender_id})
+            
+            kb_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base.md")
+            kb_content = ""
+            if os.path.exists(kb_path):
+                with open(kb_path, "r", encoding="utf-8") as f:
+                    kb_content = f.read()
+            else:
+                logger.log_warn("Main", "process_message", "knowledge_base.md not found, using empty context")
+                    
+            assistant_reply = await classifier.answer_faq(content, kb_content, recent_history)
+            await handler.send_direct_message(sender_id, assistant_reply)
+            
+            history.append({"role": "assistant", "content": assistant_reply})
+            await save_session(sender_id, history)
+            
+            await sheet_manager.record_history({
+                "timestamp": timestamp,
+                "facebookId": sender_id,
+                "requestType": classification.category,
+                "confidence": classification.confidence,
+                "status": "success"
+            })
+            await sheet_manager.update_dashboard()
+            return
+            
         # Step 4: Handle Leave Requests
         if classification.category in ["training_leave", "meeting_leave"]:
             logger.log_info("Main", "process_message", "→ Step 4: Processing leave request", {"senderId": sender_id})
@@ -330,3 +431,26 @@ async def process_message(message_data: dict):
             "confidence": 0.0,
             "status": "failed"
         })
+
+# ------------------------------------------------------------------
+# Static Files & React Router Catch-All
+# ------------------------------------------------------------------
+
+# Serve static assets (JS, CSS, images) from frontend/dist/assets
+if os.path.exists("frontend/dist/assets"):
+    app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
+
+# Serve specific root files like vite.svg or favicon.ico if they exist
+if os.path.exists("frontend/dist"):
+    @app.get("/{filename:path}")
+    async def serve_root_files(filename: str):
+        file_path = os.path.join("frontend/dist", filename)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        # If it's not a file (e.g. a React route like /dashboard), return index.html
+        return FileResponse("frontend/dist/index.html")
+    
+    # Catch-all for React Router on root
+    @app.get("/")
+    async def serve_index():
+        return FileResponse("frontend/dist/index.html")

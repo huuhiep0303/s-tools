@@ -24,9 +24,10 @@ SCOPES = [
 
 SHEET_STRUCTURES = {
     "Members":         ["Facebook_ID", "Name", "Active_Status", "Status_Date", "Fee_Eligibility", "Fee_Amount"],
+    "Events":          ["Event_ID", "Event_Name", "Date", "Description", "Notified"],
     "Leaves":          ["Record_ID", "Facebook_ID", "Request_Type", "Date", "Reason", "Created_At"],
     "Request_History": ["Record_ID", "Timestamp", "Facebook_ID", "Request_Type", "Confidence", "Status"],
-    "Manual_Review":   ["Record_ID", "Message_Content", "Sender_ID", "Timestamp", "Confidence", "Reviewed", "Manual_Classification"],
+    "Manual_Review":   ["Record_ID", "Message_Content", "Sender_ID", "Timestamp", "Confidence", "Reviewed", "Manual_Classification", "Sender_Name"],
     "Dashboard":       ["Total_Active_Members", "Total_Paused_Members", "Total_Quit_Members",
                         "Monthly_Revenue", "Training_Leave_Count", "Meeting_Leave_Count", "Last_Updated"],
 }
@@ -198,12 +199,42 @@ class SheetManager:
             review.get("confidence", 0),
             "true" if review.get("reviewed") else "false",
             review.get("manualClassification", ""),
+            review.get("senderName", ""),
         ]
         logger.log_info("Sheet_Manager", "recordManualReview",
                         "Recording to Manual_Review queue", {"senderId": review.get("senderId"), "recordId": record_id})
         await asyncio.to_thread(self._append_row, "Manual_Review", row)
         logger.log_info("Sheet_Manager", "recordManualReview",
                         "Manual review record created", {"recordId": record_id})
+
+    async def resolve_manual_review(self, record_id: str, final_category: str) -> dict:
+        """Mark a manual review as resolved and update its category."""
+        import asyncio
+        return await asyncio.to_thread(self._sync_resolve_manual_review, record_id, final_category)
+
+    def _sync_resolve_manual_review(self, record_id: str, final_category: str) -> dict:
+        ws = self._spreadsheet.worksheet("Manual_Review")
+        values = ws.get_all_values()
+        row_index = None
+        review_data = None
+        for i, row in enumerate(values[1:], start=2):
+            if row[0] == record_id:
+                row_index = i
+                review_data = {
+                    "recordId": row[0],
+                    "messageContent": row[1] if len(row) > 1 else "",
+                    "senderId": row[2] if len(row) > 2 else "",
+                    "timestamp": row[3] if len(row) > 3 else "",
+                    "confidence": float(row[4]) if len(row) > 4 else 0.0,
+                }
+                break
+        
+        if not row_index:
+            raise ValueError(f"Manual review {record_id} not found")
+            
+        ws.update(f"F{row_index}:G{row_index}", [["true", final_category]])
+        logger.log_info("Sheet_Manager", "resolveManualReview", "Manual review resolved", {"recordId": record_id, "finalCategory": final_category})
+        return review_data
 
     async def update_dashboard(self):
         """Recalculate and write dashboard stats."""
@@ -220,9 +251,9 @@ class SheetManager:
         # Members stats
         ws_members = self._spreadsheet.worksheet("Members")
         member_rows = ws_members.get_all_values()[1:]
-        active = sum(1 for r in member_rows if len(r) > 2 and r[2] == "active")
-        paused = sum(1 for r in member_rows if len(r) > 2 and r[2] == "paused")
-        quit_c = sum(1 for r in member_rows if len(r) > 2 and r[2] == "inactive")
+        active = sum(1 for r in member_rows if len(r) > 2 and r[2].strip().lower() == "active")
+        paused = sum(1 for r in member_rows if len(r) > 2 and r[2].strip().lower() == "paused")
+        quit_c = sum(1 for r in member_rows if len(r) > 2 and r[2].strip().lower() == "inactive")
         revenue = active * 200000
 
         # Leaves this month
@@ -255,6 +286,206 @@ class SheetManager:
             ws_dash.update("A2:G2", [data_row])
         logger.log_info("Sheet_Manager", "updateDashboard",
                         "Dashboard updated", {"active": active, "revenue": revenue})
+
+    # ------------------------------------------------------------------
+    # Read operations
+    # ------------------------------------------------------------------
+
+    async def get_dashboard_stats(self) -> dict:
+        import asyncio
+        return await asyncio.to_thread(self._sync_get_dashboard_stats)
+
+    def _sync_get_dashboard_stats(self) -> dict:
+        try:
+            # Members stats
+            ws_members = self._spreadsheet.worksheet("Members")
+            member_rows = ws_members.get_all_values()[1:]
+            active = sum(1 for r in member_rows if len(r) > 2 and r[2].strip().lower() == "active")
+            paused = sum(1 for r in member_rows if len(r) > 2 and r[2].strip().lower() == "paused")
+            quit_c = sum(1 for r in member_rows if len(r) > 2 and r[2].strip().lower() == "inactive")
+            revenue = active * 200000
+
+            # Leaves this month
+            now = datetime.utcnow()
+            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            try:
+                ws_leaves = self._spreadsheet.worksheet("Leaves")
+                leave_rows = ws_leaves.get_all_values()[1:]
+            except Exception:
+                leave_rows = []
+                
+            training = meeting = 0
+            for r in leave_rows:
+                if len(r) < 6:
+                    continue
+                try:
+                    created = datetime.fromisoformat(r[5].replace("Z", "+00:00"))
+                    if created >= month_start.replace(tzinfo=created.tzinfo):
+                        if r[2] == "training_leave":
+                            training += 1
+                        elif r[2] == "meeting_leave":
+                            meeting += 1
+                except Exception:
+                    pass
+
+            return {
+                "activeMembers": active,
+                "pausedMembers": paused,
+                "quitMembers": quit_c,
+                "monthlyRevenue": revenue,
+                "trainingLeaveCount": training,
+                "meetingLeaveCount": meeting,
+                "lastUpdated": now.isoformat() + "Z"
+            }
+        except Exception as exc:
+            logger.log_error("Sheet_Manager", "getDashboardStats", "Error", {"error": exc})
+            return {}
+
+    async def get_members(self) -> list:
+        import asyncio
+        return await asyncio.to_thread(self._sync_get_members)
+
+    def _sync_get_members(self) -> list:
+        try:
+            ws_members = self._spreadsheet.worksheet("Members")
+            member_values = ws_members.get_all_values()
+            
+            try:
+                ws_leaves = self._spreadsheet.worksheet("Leaves")
+                leave_values = ws_leaves.get_all_values()
+            except Exception:
+                leave_values = []
+                
+            leave_counts = {}
+            for row in leave_values[1:]:
+                if len(row) >= 3:
+                    fb_id = row[1]
+                    req_type = row[2]
+                    if fb_id not in leave_counts:
+                        leave_counts[fb_id] = {"training": 0, "meeting": 0}
+                    if req_type == "training_leave":
+                        leave_counts[fb_id]["training"] += 1
+                    elif req_type == "meeting_leave":
+                        leave_counts[fb_id]["meeting"] += 1
+
+            members = []
+            for row in member_values[1:]:
+                if len(row) >= 2:
+                    fb_id = row[0]
+                    stats = leave_counts.get(fb_id, {"training": 0, "meeting": 0})
+                    members.append({
+                        "facebookId": fb_id,
+                        "name": row[1],
+                        "activeStatus": row[2] if len(row) > 2 else "",
+                        "statusDate": row[3] if len(row) > 3 else "",
+                        "feeEligibility": row[4] if len(row) > 4 else "",
+                        "feeAmount": int(row[5]) if len(row) > 5 and row[5].isdigit() else 0,
+                        "trainingLeaveCount": stats["training"],
+                        "meetingLeaveCount": stats["meeting"]
+                    })
+            return members
+        except Exception as exc:
+            logger.log_error("Sheet_Manager", "getMembers", "Error", {"error": exc})
+            return []
+
+    async def get_events(self) -> list:
+        import asyncio
+        return await asyncio.to_thread(self._sync_get_events)
+
+    def _sync_get_events(self) -> list:
+        try:
+            ws = self._spreadsheet.worksheet("Events")
+            values = ws.get_all_values()
+            events = []
+            for row in values[1:]:
+                if len(row) >= 3:
+                    events.append({
+                        "eventId": row[0],
+                        "eventName": row[1],
+                        "date": row[2],
+                        "description": row[3] if len(row) > 3 else "",
+                        "notified": row[4].lower() == 'true' if len(row) > 4 else False,
+                    })
+            return events
+        except Exception as exc:
+            logger.log_error("Sheet_Manager", "getEvents", "Error", {"error": exc})
+            return []
+
+    async def mark_event_notified(self, event_id: str):
+        import asyncio
+        await asyncio.to_thread(self._sync_mark_event_notified, event_id)
+
+    def _sync_mark_event_notified(self, event_id: str):
+        ws = self._spreadsheet.worksheet("Events")
+        values = ws.get_all_values()
+        for i, row in enumerate(values[1:], start=2):
+            if row[0] == event_id:
+                ws.update_cell(i, 5, "true")
+                break
+
+    async def get_manual_reviews(self) -> list:
+        import asyncio
+        return await asyncio.to_thread(self._sync_get_manual_reviews)
+
+    def _sync_get_manual_reviews(self) -> list:
+        try:
+            ws = self._spreadsheet.worksheet("Manual_Review")
+            values = ws.get_all_values()
+            
+            try:
+                ws_members = self._spreadsheet.worksheet("Members")
+                member_values = ws_members.get_all_values()
+                member_map = {row[0]: row[1] for row in member_values[1:] if len(row) >= 2}
+            except Exception:
+                member_map = {}
+                
+            reviews = []
+            for row in values[1:]:
+                if len(row) >= 3:
+                    sender_id = row[2]
+                    sender_name = row[7] if len(row) > 7 and row[7] else member_map.get(sender_id, sender_id)
+                    reviews.append({
+                        "recordId": row[0],
+                        "messageContent": row[1],
+                        "senderId": sender_id,
+                        "senderName": sender_name,
+                        "timestamp": row[3] if len(row) > 3 else "",
+                        "confidence": float(row[4]) if len(row) > 4 else 0,
+                        "reviewed": row[5].lower() == "true" if len(row) > 5 else False,
+                        "manualClassification": row[6] if len(row) > 6 else "",
+                    })
+            return reviews
+        except Exception as exc:
+            logger.log_error("Sheet_Manager", "getManualReviews", "Error", {"error": exc})
+            return []
+
+    async def get_recent_requests(self) -> list:
+        import asyncio
+        return await asyncio.to_thread(self._sync_get_recent_requests)
+
+    def _sync_get_recent_requests(self) -> list:
+        try:
+            ws = self._spreadsheet.worksheet("Request_History")
+            values = ws.get_all_values()
+            requests = []
+            # Get last 50 requests, reverse order
+            for row in reversed(values[1:]):
+                if len(row) >= 3:
+                    requests.append({
+                        "recordId": row[0],
+                        "timestamp": row[1],
+                        "facebookId": row[2],
+                        "requestType": row[3] if len(row) > 3 else "",
+                        "confidence": float(row[4]) if len(row) > 4 else 0,
+                        "status": row[5] if len(row) > 5 else "",
+                    })
+                if len(requests) >= 50:
+                    break
+            return requests
+        except Exception as exc:
+            logger.log_error("Sheet_Manager", "getRecentRequests", "Error", {"error": exc})
+            return []
 
     # ------------------------------------------------------------------
     # Internal

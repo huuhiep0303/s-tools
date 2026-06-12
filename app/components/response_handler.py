@@ -55,7 +55,7 @@ class ResponseHandler:
         logger.log_info("Response_Handler", "send_confirmation",
                         "Sending confirmation", {"recipientId": recipient_id, "category": category})
         try:
-            await self._send_message(recipient_id, message, timeout=10)
+            await self.send_direct_message(recipient_id, message, timeout=10)
             logger.log_info("Response_Handler", "send_confirmation",
                             "Confirmation sent successfully", {"recipientId": recipient_id})
         except Exception as exc:
@@ -71,7 +71,7 @@ class ResponseHandler:
                         "Sending clarification request", {"recipientId": recipient_id})
         try:
             await retry_fixed(
-                lambda: self._send_message(recipient_id, message, timeout=10),
+                lambda: self.send_direct_message(recipient_id, message, timeout=10),
                 max_attempts=3, delay_ms=5000,
                 on_retry=lambda attempt, exc: logger.log_warn(
                     "Response_Handler", "sendClarificationRequest",
@@ -108,7 +108,7 @@ class ResponseHandler:
     async def _notify_admin(self, admin_id: str, message: str):
         try:
             await retry_fixed(
-                lambda: self._send_message(admin_id, message, timeout=30),
+                lambda: self.send_direct_message(admin_id, message, timeout=30),
                 max_attempts=3, delay_ms=60000,
                 on_retry=lambda attempt, exc: logger.log_warn(
                     "Response_Handler", "sendAdminNotification",
@@ -123,7 +123,7 @@ class ResponseHandler:
                              "Failed to send admin notification after all retries",
                              {"error": exc, "adminId": admin_id})
 
-    async def _send_message(self, recipient_id: str, message: str, timeout: int = 10):
+    async def send_direct_message(self, recipient_id: str, message: str, timeout: int = 10):
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{FB_API_BASE}/me/messages",
