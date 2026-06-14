@@ -1,14 +1,14 @@
 providers = ["python", "node"]
 
 [variables]
-NIXPACKS_NODE_VERSION = "22"
+NIXPACKS_NODE_VERSION = "23"
 
 [phases.install]
 cmds = [
     "python -m venv /opt/venv",
     ". /opt/venv/bin/activate",
     "pip install -r requirements.txt",
-    "cd frontend && rm -f package-lock.json && npm install"
+    "cd frontend && rm -rf node_modules package-lock.json && npm install"
 ]
 
 [phases.build]
