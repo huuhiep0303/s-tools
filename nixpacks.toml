@@ -1,6 +1,4 @@
-[providers]
-python = {}
-node = {}
+providers = ["python", "node"]
 
 [phases.setup]
 nixPkgs = ["python312", "nodejs"]
