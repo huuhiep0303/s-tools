@@ -34,6 +34,7 @@ from app.crud import leave as crud_leave
 from app.crud import financial as crud_financial
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
+from app.auth import verify_token
 
 # Global component instances
 classifier = AIClassifier()
@@ -94,7 +95,7 @@ async def health_check():
 # ------------------------------------------------------------------
 
 @app.get("/api/v1/dashboard")
-async def get_dashboard(db: AsyncSession = Depends(get_db)):
+async def get_dashboard(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get dashboard statistics."""
     # Compute stats from PostgreSQL
     active = await crud_user.count_users_by_status(db, "ACTIVE")
@@ -118,7 +119,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
     }
 
 @app.get("/api/v1/members")
-async def get_members(db: AsyncSession = Depends(get_db)):
+async def get_members(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get all members."""
     users = await crud_user.get_all_users(db)
     members = []
@@ -137,7 +138,7 @@ async def get_members(db: AsyncSession = Depends(get_db)):
     return members
 
 @app.get("/api/v1/manual-reviews")
-async def get_manual_reviews(db: AsyncSession = Depends(get_db)):
+async def get_manual_reviews(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get manual review queue."""
     reviews = await crud_bot.get_manual_reviews(db)
     return [{
@@ -152,7 +153,7 @@ async def get_manual_reviews(db: AsyncSession = Depends(get_db)):
     } for r in reviews]
 
 @app.get("/api/v1/history")
-async def get_history(db: AsyncSession = Depends(get_db)):
+async def get_history(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get recent request history."""
     history = await crud_bot.get_bot_history(db)
     return [{
@@ -168,7 +169,7 @@ class ResolveReviewRequest(BaseModel):
     finalCategory: str
 
 @app.post("/api/v1/manual-reviews/{record_id}/resolve")
-async def resolve_manual_review(record_id: str, req: ResolveReviewRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def resolve_manual_review(record_id: str, req: ResolveReviewRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Resolve a manual review and send confirmation."""
     try:
         updated_review = await crud_bot.resolve_manual_review(db, record_id, req.finalCategory)
@@ -542,6 +543,75 @@ async def process_message(message_data: dict):
                 "confidence": 0.0,
                 "status": "failed"
             })
+
+# ------------------------------------------------------------------
+# Auth Endpoints
+# ------------------------------------------------------------------
+import random
+from app.auth import create_access_token
+
+# In-memory store for OTPs (For production, consider Redis or DB)
+otp_store = {}
+
+class OTPRequest(BaseModel):
+    facebookId: str
+
+class OTPVerifyRequest(BaseModel):
+    facebookId: str
+    otp: str
+
+@app.post("/api/v1/auth/request-otp")
+async def request_otp(req: OTPRequest, db: AsyncSession = Depends(get_db)):
+    # Verify user exists
+    user = await crud_user.get_user_by_facebook_id(db, req.facebookId)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    otp = str(random.randint(100000, 999999))
+    otp_store[req.facebookId] = otp
+    
+    # In a real scenario, you send this OTP via messenger
+    msg = f"Mã xác thực (OTP) để đăng nhập S-Group Platform của bạn là: {otp}\nVui lòng không chia sẻ mã này cho bất kỳ ai."
+    await handler.send_direct_message(req.facebookId, msg)
+    
+    # Also log it for debugging
+    logger.log_info("Auth", "request-otp", f"OTP generated for {req.facebookId}: {otp}")
+    
+    return {"status": "ok", "message": "OTP sent via Messenger"}
+
+@app.post("/api/v1/auth/verify-otp")
+async def verify_otp(req: OTPVerifyRequest, db: AsyncSession = Depends(get_db)):
+    saved_otp = otp_store.get(req.facebookId)
+    if not saved_otp or saved_otp != req.otp:
+        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
+        
+    # Get user to determine role
+    user = await crud_user.get_user_by_facebook_id(db, req.facebookId)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # For now, admin if facebook_id in ADMIN_FACEBOOK_IDS env (or just assign user role)
+    admin_ids = os.getenv("ADMIN_FACEBOOK_IDS", "").split(",")
+    role = "admin" if req.facebookId in admin_ids else "user"
+    
+    token = create_access_token({
+        "sub": req.facebookId,
+        "name": user.full_name,
+        "role": role
+    })
+    
+    # Clear OTP
+    del otp_store[req.facebookId]
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "facebookId": req.facebookId,
+            "name": user.full_name,
+            "role": role
+        }
+    }
 
 # ------------------------------------------------------------------
 # Static Files & React Router Catch-All

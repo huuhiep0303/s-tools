@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchDashboard, fetchHistory } from '../api';
+import { useAuth } from '../contexts/AuthContext';
+import UserDashboard from './user/UserDashboard';
 import { Users, UserMinus, UserCheck, DollarSign, CalendarOff, Activity } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -31,15 +33,23 @@ function StatCard({ title, value, icon: Icon, trend, colorClass }: any) {
 }
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard'],
     queryFn: fetchDashboard,
+    enabled: user?.role === 'admin',
   });
 
   const { data: history, isLoading: historyLoading } = useQuery({
     queryKey: ['history'],
     queryFn: fetchHistory,
+    enabled: user?.role === 'admin',
   });
+
+  if (user?.role === 'user') {
+    return <UserDashboard />;
+  }
 
   if (statsLoading || historyLoading) {
     return (

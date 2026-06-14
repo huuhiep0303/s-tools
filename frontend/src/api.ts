@@ -1,25 +1,33 @@
-const API_BASE = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
+const API_BASE = '/api';
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('sgroup_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+};
 
 export const fetchDashboard = async () => {
-  const res = await fetch(`${API_BASE}/v1/dashboard`);
+  const res = await fetch(`${API_BASE}/v1/dashboard`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch dashboard stats');
   return res.json();
 };
 
 export const fetchMembers = async () => {
-  const res = await fetch(`${API_BASE}/v1/members`);
+  const res = await fetch(`${API_BASE}/v1/members`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch members');
   return res.json();
 };
 
 export const fetchReviews = async () => {
-  const res = await fetch(`${API_BASE}/v1/manual-reviews`);
+  const res = await fetch(`${API_BASE}/v1/manual-reviews`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch reviews');
   return res.json();
 };
 
 export const fetchHistory = async () => {
-  const res = await fetch(`${API_BASE}/v1/history`);
+  const res = await fetch(`${API_BASE}/v1/history`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch history');
   return res.json();
 };
@@ -27,7 +35,7 @@ export const fetchHistory = async () => {
 export const resolveReview = async (recordId: string, finalCategory: string) => {
   const res = await fetch(`${API_BASE}/v1/manual-reviews/${recordId}/resolve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ finalCategory }),
   });
   if (!res.ok) throw new Error('Failed to resolve review');
