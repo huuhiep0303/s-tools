@@ -1,5 +1,8 @@
 providers = ["python", "node"]
 
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+
 [phases.install]
 cmds = [
     "python -m venv /opt/venv",
