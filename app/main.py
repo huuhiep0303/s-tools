@@ -174,9 +174,53 @@ async def get_my_stats(db: AsyncSession = Depends(get_db), token_payload: dict =
     }
 
 
+class LeaveSubmitRequest(BaseModel):
+    type: str
+    date: str
+    reason: str
+
+@app.post("/api/v1/leaves")
+async def submit_leave_request(req: LeaveSubmitRequest, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    """Submit a leave request."""
+    facebook_id = token_payload.get("sub")
+    if not facebook_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+        
+    user = await crud_user.get_user_by_facebook_id(db, facebook_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Parse date
+    try:
+        leave_date = datetime.strptime(req.date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        
+    # Create request
+    leave_data = {
+        "user_id": user.id,
+        "type": req.type,
+        "date": leave_date,
+        "reason": req.reason,
+        "status": "PENDING"
+    }
+    
+    await crud_leave.create_leave_request(db, leave_data)
+    
+    # Send confirmation message
+    msg = f"S-Group đã nhận đơn xin nghỉ của bạn:\nLoại: {'Đào tạo' if req.type == 'training_leave' else 'Họp tháng'}\nNgày: {req.date}\nLý do: {req.reason}\nTrạng thái: CHỜ DUYỆT"
+    await handler.send_direct_message(facebook_id, msg)
+    
+    return {"status": "ok", "message": "Leave request submitted successfully"}
+
+
 @app.get("/api/v1/manual-reviews")
 async def get_manual_reviews(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get manual review queue."""
+    # Ensure admin
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
     reviews = await crud_bot.get_manual_reviews(db)
     return [{
         "recordId": r.id,
@@ -192,6 +236,9 @@ async def get_manual_reviews(db: AsyncSession = Depends(get_db), token_payload: 
 @app.get("/api/v1/history")
 async def get_history(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get recent request history."""
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
     history = await crud_bot.get_bot_history(db)
     return [{
         "recordId": h.id,
@@ -208,6 +255,9 @@ class ResolveReviewRequest(BaseModel):
 @app.post("/api/v1/manual-reviews/{record_id}/resolve")
 async def resolve_manual_review(record_id: str, req: ResolveReviewRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Resolve a manual review and send confirmation."""
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
     try:
         updated_review = await crud_bot.resolve_manual_review(db, record_id, req.finalCategory)
         if not updated_review:
@@ -237,6 +287,97 @@ async def resolve_manual_review(record_id: str, req: ResolveReviewRequest, backg
     except Exception as exc:
         logger.log_error("Main", "resolve_manual_review", "Error", {"error": exc})
         raise HTTPException(status_code=500, detail=str(exc))
+
+class ResolveLeaveRequest(BaseModel):
+    status: str
+    adminNotes: str = ""
+
+@app.get("/api/v1/admin/leaves")
+async def get_all_leaves(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    leaves = await crud_leave.get_leave_requests(db)
+    # Get user names for UI convenience
+    users = {u.id: u for u in await crud_user.get_all_users(db)}
+    return [{
+        "id": l.id,
+        "userId": l.user_id,
+        "userName": users[l.user_id].full_name if l.user_id in users else "Unknown",
+        "facebookId": users[l.user_id].facebook_id if l.user_id in users else "Unknown",
+        "type": l.type,
+        "date": l.date.isoformat(),
+        "reason": l.reason,
+        "status": l.status,
+        "createdAt": l.created_at.isoformat() + "Z"
+    } for l in leaves]
+
+@app.post("/api/v1/admin/leaves/{leave_id}/resolve")
+async def resolve_leave(leave_id: str, req: ResolveLeaveRequest, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    updated = await crud_leave.update_leave_request(db, leave_id, {
+        "status": req.status,
+        "admin_notes": req.adminNotes
+    })
+    if not updated:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+        
+    user = await crud_user.get_user(db, updated.user_id)
+    if user:
+        status_vi = "ĐÃ ĐƯỢC DUYỆT" if req.status == "APPROVED" else "BỊ TỪ CHỐI"
+        msg = f"S-Group thông báo:\nĐơn xin nghỉ ngày {updated.date.isoformat()} của bạn {status_vi}."
+        if req.adminNotes:
+            msg += f"\nLý do/Ghi chú: {req.adminNotes}"
+        await handler.send_direct_message(user.facebook_id, msg)
+        
+    return {"status": "ok"}
+
+class PayRequest(BaseModel):
+    month: str
+
+@app.get("/api/v1/admin/financials")
+async def get_all_financials(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    records = await crud_financial.get_financial_records(db)
+    users = {u.id: u for u in await crud_user.get_all_users(db)}
+    return [{
+        "id": r.id,
+        "userName": users[r.user_id].full_name if r.user_id in users else "Unknown",
+        "month": r.month,
+        "amountDue": r.amount_due,
+        "amountPaid": r.amount_paid,
+        "status": r.status
+    } for r in records]
+
+@app.post("/api/v1/admin/financials/{user_id}/pay")
+async def pay_financial(user_id: str, req: PayRequest, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    # Check if record for this month exists
+    records = await crud_financial.get_financial_records(db, user_id=user_id, month=req.month)
+    if not records:
+        # Create a new record
+        record = await crud_financial.create_financial_record(db, {
+            "user_id": user_id,
+            "month": req.month,
+            "amount_due": 200000,
+            "amount_paid": 200000,
+            "status": "PAID",
+            "updated_by_admin_id": token_payload.get("sub") # Store admin facebook_id roughly
+        })
+    else:
+        # Update existing
+        record = records[0]
+        await crud_financial.update_financial_record(db, record.id, {
+            "amount_paid": record.amount_due,
+            "status": "PAID",
+            "updated_by_admin_id": token_payload.get("sub")
+        })
+        
+    return {"status": "ok"}
 
 
 

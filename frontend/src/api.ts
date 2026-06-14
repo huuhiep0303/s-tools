@@ -14,6 +14,16 @@ export const fetchUserStats = async () => {
   return res.json();
 };
 
+export const submitLeaveRequest = async (type: string, date: string, reason: string) => {
+  const res = await fetch(`${API_BASE}/v1/leaves`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ type, date, reason }),
+  });
+  if (!res.ok) throw new Error('Failed to submit leave request');
+  return res.json();
+};
+
 export const fetchDashboard = async () => {
   const res = await fetch(`${API_BASE}/v1/dashboard`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch dashboard stats');

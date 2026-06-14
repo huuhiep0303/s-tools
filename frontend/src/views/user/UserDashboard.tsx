@@ -1,15 +1,43 @@
 import { useAuth } from '../../contexts/AuthContext';
 import { Calendar, DollarSign, Activity, FileText } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { fetchUserStats } from '../../api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchUserStats, submitLeaveRequest } from '../../api';
+import { useState } from 'react';
 
 export default function UserDashboard() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  
+  const [leaveType, setLeaveType] = useState('training_leave');
+  const [leaveDate, setLeaveDate] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
   
   const { data: userStats, isLoading } = useQuery({
     queryKey: ['userStats'],
     queryFn: fetchUserStats,
   });
+
+  const leaveMutation = useMutation({
+    mutationFn: () => submitLeaveRequest(leaveType, leaveDate, leaveReason),
+    onSuccess: () => {
+      alert("Đã gửi đơn xin nghỉ thành công! Bot sẽ gửi thông báo đến Facebook của bạn.");
+      setLeaveDate('');
+      setLeaveReason('');
+      queryClient.invalidateQueries({ queryKey: ['userStats'] });
+    },
+    onError: (err) => {
+      alert("Lỗi khi gửi đơn: " + err.message);
+    }
+  });
+
+  const handleSubmitLeave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!leaveDate || !leaveReason) {
+      alert("Vui lòng điền đầy đủ ngày và lý do.");
+      return;
+    }
+    leaveMutation.mutate();
+  };
 
   if (isLoading) {
     return (
@@ -98,24 +126,43 @@ export default function UserDashboard() {
             <h3 className="text-lg font-bold text-slate-800">Đăng ký xin nghỉ</h3>
           </div>
           
-          <form className="space-y-4">
+          <form className="space-y-4" onSubmit={handleSubmitLeave}>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Loại xin nghỉ</label>
-              <select className="w-full border-slate-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border bg-white">
-                <option value="training">Nghỉ đào tạo</option>
-                <option value="meeting">Nghỉ họp tháng</option>
+              <select 
+                className="w-full border-slate-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border bg-white"
+                value={leaveType}
+                onChange={e => setLeaveType(e.target.value)}
+              >
+                <option value="training_leave">Nghỉ đào tạo</option>
+                <option value="meeting_leave">Nghỉ họp tháng</option>
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Ngày xin nghỉ</label>
-              <input type="date" className="w-full border-slate-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border" />
+              <input 
+                type="date" 
+                className="w-full border-slate-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border"
+                value={leaveDate}
+                onChange={e => setLeaveDate(e.target.value)}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Lý do</label>
-              <textarea rows={3} className="w-full border-slate-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border placeholder:text-slate-400" placeholder="Nhập lý do chính đáng..."></textarea>
+              <textarea 
+                rows={3} 
+                className="w-full border-slate-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border placeholder:text-slate-400" 
+                placeholder="Nhập lý do chính đáng..."
+                value={leaveReason}
+                onChange={e => setLeaveReason(e.target.value)}
+              ></textarea>
             </div>
-            <button type="button" className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors">
-              Gửi yêu cầu
+            <button 
+              type="submit" 
+              disabled={leaveMutation.isPending}
+              className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {leaveMutation.isPending ? "Đang gửi..." : "Gửi yêu cầu"}
             </button>
           </form>
         </div>
