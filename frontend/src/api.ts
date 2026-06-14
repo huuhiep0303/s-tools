@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
 
 export const fetchDashboard = async () => {
   const res = await fetch(`${API_BASE}/v1/dashboard`);
