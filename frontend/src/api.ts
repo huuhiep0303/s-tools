@@ -8,6 +8,12 @@ const getAuthHeaders = () => {
   };
 };
 
+export const fetchUserStats = async () => {
+  const res = await fetch(`${API_BASE}/v1/users/me/stats`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch user stats');
+  return res.json();
+};
+
 export const fetchDashboard = async () => {
   const res = await fetch(`${API_BASE}/v1/dashboard`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch dashboard stats');

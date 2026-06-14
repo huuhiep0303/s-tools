@@ -1,14 +1,34 @@
 import { useAuth } from '../../contexts/AuthContext';
 import { Calendar, DollarSign, Activity, FileText } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { fetchUserStats } from '../../api';
 
 export default function UserDashboard() {
   const { user } = useAuth();
   
-  // Fake data for now, since we haven't implemented the user API yet
-  const userStats = {
-    feeStatus: 'Đã nộp đến T10/2026',
+  const { data: userStats, isLoading } = useQuery({
+    queryKey: ['userStats'],
+    queryFn: fetchUserStats,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="h-8 w-48 bg-slate-200 rounded"></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-32 bg-slate-100 rounded-2xl"></div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback data if error
+  const stats = userStats || {
+    feeStatus: 'Chưa có dữ liệu',
     feeDebt: '0 ₫',
-    trainingLeaves: 1,
+    trainingLeaves: 0,
     meetingLeaves: 0,
   };
 
@@ -27,8 +47,8 @@ export default function UserDashboard() {
               <DollarSign size={20} />
             </div>
           </div>
-          <p className="text-xl font-bold text-slate-800">{userStats.feeStatus}</p>
-          <p className="text-sm text-slate-500 mt-1">Nợ: <span className="text-emerald-600 font-medium">{userStats.feeDebt}</span></p>
+          <p className="text-xl font-bold text-slate-800">{stats.feeStatus}</p>
+          <p className="text-sm text-slate-500 mt-1">Nợ: <span className="text-emerald-600 font-medium">{stats.feeDebt}</span></p>
         </div>
 
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
@@ -38,7 +58,7 @@ export default function UserDashboard() {
               <Calendar size={20} />
             </div>
           </div>
-          <p className="text-3xl font-bold text-slate-800">{userStats.trainingLeaves}</p>
+          <p className="text-3xl font-bold text-slate-800">{stats.trainingLeaves}</p>
           <p className="text-sm text-slate-500 mt-1">Trong tháng này</p>
         </div>
 
@@ -49,7 +69,7 @@ export default function UserDashboard() {
               <Activity size={20} />
             </div>
           </div>
-          <p className="text-3xl font-bold text-slate-800">{userStats.meetingLeaves}</p>
+          <p className="text-3xl font-bold text-slate-800">{stats.meetingLeaves}</p>
           <p className="text-sm text-slate-500 mt-1">Trong năm nay</p>
         </div>
       </div>

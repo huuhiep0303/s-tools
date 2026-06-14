@@ -137,6 +137,43 @@ async def get_members(db: AsyncSession = Depends(get_db), token_payload: dict = 
         })
     return members
 
+@app.get("/api/v1/users/me/stats")
+async def get_my_stats(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    """Get stats for the currently logged in user."""
+    facebook_id = token_payload.get("sub")
+    if not facebook_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+        
+    user = await crud_user.get_user_by_facebook_id(db, facebook_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Get financial records
+    fin_records = await crud_financial.get_financial_records(db, user_id=user.id)
+    total_due = sum(r.amount_due for r in fin_records)
+    total_paid = sum(r.amount_paid for r in fin_records)
+    fee_debt = total_due - total_paid
+    
+    # Get latest paid month
+    paid_months = sorted([r.month for r in fin_records if r.status == "PAID"], reverse=True)
+    fee_status = f"Đã nộp đến T{paid_months[0][-2:]}/{paid_months[0][:4]}" if paid_months else "Chưa có dữ liệu nộp quỹ"
+    
+    # Get leave records
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).date()
+    year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0).date()
+    
+    training_leaves = await crud_leave.get_leaves_in_month(db, month_start, now.date(), "training_leave")
+    meeting_leaves = await crud_leave.get_leaves_in_month(db, year_start, now.date(), "meeting_leave")
+    
+    return {
+        "feeStatus": fee_status,
+        "feeDebt": f"{int(fee_debt):,} ₫".replace(",", "."),
+        "trainingLeaves": training_leaves,
+        "meetingLeaves": meeting_leaves,
+    }
+
+
 @app.get("/api/v1/manual-reviews")
 async def get_manual_reviews(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
     """Get manual review queue."""
