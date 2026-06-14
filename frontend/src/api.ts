@@ -8,6 +8,32 @@ const getAuthHeaders = () => {
   };
 };
 
+export const getPublicUsers = async () => {
+  const res = await fetch(`${API_BASE}/v1/auth/users`);
+  if (!res.ok) throw new Error('Failed to fetch users');
+  return res.json();
+};
+
+export const requestMagicLink = async (userId: string) => {
+  const res = await fetch(`${API_BASE}/v1/auth/request-magic-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) throw new Error('Failed to request magic link');
+  return res.json();
+};
+
+export const verifyMagicLink = async (token: string) => {
+  const res = await fetch(`${API_BASE}/v1/auth/verify-magic-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw new Error('Invalid or expired token');
+  return res.json();
+};
+
 export const fetchUserStats = async () => {
   const res = await fetch(`${API_BASE}/v1/users/me/stats`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Failed to fetch user stats');

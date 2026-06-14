@@ -728,64 +728,73 @@ async def process_message(message_data: dict):
 import random
 from app.auth import create_access_token
 
-# In-memory store for OTPs (For production, consider Redis or DB)
-otp_store = {}
+# In-memory store for tokens (For production, consider Redis or DB)
+token_store = {}
 
-class OTPRequest(BaseModel):
-    facebookId: str
+@app.get("/api/v1/auth/users")
+async def get_public_users(db: AsyncSession = Depends(get_db)):
+    """Get list of users for login dropdown."""
+    users = await crud_user.get_all_users(db)
+    return [{"id": u.id, "full_name": u.full_name} for u in users if u.status.value == "ACTIVE"]
 
-class OTPVerifyRequest(BaseModel):
-    facebookId: str
-    otp: str
+class MagicLinkRequest(BaseModel):
+    userId: str
 
-@app.post("/api/v1/auth/request-otp")
-async def request_otp(req: OTPRequest, db: AsyncSession = Depends(get_db)):
+class MagicLinkVerifyRequest(BaseModel):
+    token: str
+
+@app.post("/api/v1/auth/request-magic-link")
+async def request_magic_link(req: MagicLinkRequest, db: AsyncSession = Depends(get_db)):
     # Verify user exists
-    user = await crud_user.get_user_by_facebook_id(db, req.facebookId)
+    user = await crud_user.get_user(db, req.userId)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    otp = str(random.randint(100000, 999999))
-    otp_store[req.facebookId] = otp
+    magic_token = str(uuid.uuid4())
+    token_store[magic_token] = user.facebook_id
     
-    # In a real scenario, you send this OTP via messenger
-    msg = f"Mã xác thực (OTP) để đăng nhập S-Group Platform của bạn là: {otp}\nVui lòng không chia sẻ mã này cho bất kỳ ai."
-    await handler.send_direct_message(req.facebookId, msg)
+    # Send link via messenger
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    login_link = f"{frontend_url}/login?token={magic_token}"
+    msg = f"Chào {user.full_name},\nBấm vào link sau để đăng nhập vào Web S-Group (Link có hiệu lực 5 phút):\n{login_link}"
     
-    # Also log it for debugging
-    logger.log_info("Auth", "request-otp", f"OTP generated for {req.facebookId}: {otp}")
+    try:
+        await handler.send_direct_message(user.facebook_id, msg)
+    except Exception as e:
+        logger.log_error("Auth", "request-magic-link", "Failed to send message", {"error": str(e)})
+        raise HTTPException(status_code=500, detail="Không thể gửi tin nhắn qua Facebook. Liên hệ admin.")
     
-    return {"status": "ok", "message": "OTP sent via Messenger"}
+    return {"status": "ok", "message": "Magic link sent via Messenger"}
 
-@app.post("/api/v1/auth/verify-otp")
-async def verify_otp(req: OTPVerifyRequest, db: AsyncSession = Depends(get_db)):
-    saved_otp = otp_store.get(req.facebookId)
-    if not saved_otp or saved_otp != req.otp:
-        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
+@app.post("/api/v1/auth/verify-magic-link")
+async def verify_magic_link(req: MagicLinkVerifyRequest, db: AsyncSession = Depends(get_db)):
+    facebook_id = token_store.get(req.token)
+    if not facebook_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired magic link")
         
     # Get user to determine role
-    user = await crud_user.get_user_by_facebook_id(db, req.facebookId)
+    user = await crud_user.get_user_by_facebook_id(db, facebook_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
     # For now, admin if facebook_id in ADMIN_FACEBOOK_IDS env (or just assign user role)
     admin_ids = os.getenv("ADMIN_FACEBOOK_IDS", "").split(",")
-    role = "admin" if req.facebookId in admin_ids else "user"
+    role = "admin" if facebook_id in admin_ids else "user"
     
     token = create_access_token({
-        "sub": req.facebookId,
+        "sub": facebook_id,
         "name": user.full_name,
         "role": role
     })
     
-    # Clear OTP
-    del otp_store[req.facebookId]
+    # Clear token
+    del token_store[req.token]
     
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": {
-            "facebookId": req.facebookId,
+            "facebookId": facebook_id,
             "name": user.full_name,
             "role": role
         }

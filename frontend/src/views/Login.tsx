@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getPublicUsers, requestMagicLink, verifyMagicLink } from '../api';
 
 export default function Login() {
-  const [facebookId, setFacebookId] = useState('');
-  const [otp, setOtp] = useState('');
-  const [step, setStep] = useState<1 | 2>(1);
+  const [users, setUsers] = useState<{id: string, full_name: string}[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -15,59 +17,63 @@ export default function Login() {
   
   const from = location.state?.from?.pathname || '/dashboard';
 
-  const handleRequestOTP = async (e: React.FormEvent) => {
+  useEffect(() => {
+    // 1. Fetch users for dropdown
+    getPublicUsers().then(data => {
+      setUsers(data);
+      if (data.length > 0) setSelectedUserId(data[0].id);
+    }).catch(err => {
+      console.error("Failed to load users", err);
+    });
+
+    // 2. Check for token in URL
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    
+    if (token) {
+      setIsVerifying(true);
+      verifyMagicLink(token)
+        .then(data => {
+          login(data.access_token, data.user);
+          navigate(from, { replace: true });
+        })
+        .catch(err => {
+          setError(err.message || 'Link đăng nhập không hợp lệ hoặc đã hết hạn.');
+          setIsVerifying(false);
+          // Remove token from URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        });
+    }
+  }, [login, navigate, from]);
+
+  const handleRequestMagicLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/v1/auth/request-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facebookId })
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || 'Không thể gửi mã OTP. Vui lòng kiểm tra lại Facebook ID.');
-      }
-      
-      setStep(2);
+      await requestMagicLink(selectedUserId);
+      setSuccess('Đã gửi link đăng nhập. Vui lòng kiểm tra tin nhắn Messenger từ S-Group Bot.');
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Không thể gửi link đăng nhập. Vui lòng thử lại.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleVerifyOTP = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    
-    try {
-      const response = await fetch('/api/v1/auth/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facebookId, otp })
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || 'Mã OTP không hợp lệ.');
-      }
-      
-      // Login success
-      login(data.access_token, data.user);
-      navigate(from, { replace: true });
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  if (isVerifying) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-10 shadow-lg text-center">
+          <h2 className="mt-6 text-2xl font-bold tracking-tight text-gray-900 animate-pulse">
+            Đang xác thực...
+          </h2>
+          <p className="text-gray-500">Vui lòng đợi trong giây lát</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
@@ -77,92 +83,54 @@ export default function Login() {
             S-Group Platform
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            {step === 1 ? 'Đăng nhập bằng Facebook ID' : 'Nhập mã OTP đã được gửi tới Messenger'}
+            Chọn tên của bạn để nhận link đăng nhập qua Messenger
           </p>
         </div>
         
         {error && (
           <div className="rounded-md bg-red-50 p-4">
-            <div className="flex">
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">{error}</h3>
-              </div>
-            </div>
+            <h3 className="text-sm font-medium text-red-800">{error}</h3>
           </div>
         )}
 
-        {step === 1 ? (
-          <form className="mt-8 space-y-6" onSubmit={handleRequestOTP}>
-            <div className="-space-y-px rounded-md shadow-sm">
-              <div>
-                <label htmlFor="facebookId" className="sr-only">
-                  Facebook ID
-                </label>
-                <input
-                  id="facebookId"
-                  name="facebookId"
-                  type="text"
-                  required
-                  className="relative block w-full rounded-md border-0 py-2.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                  placeholder="Nhập Facebook ID của bạn"
-                  value={facebookId}
-                  onChange={(e) => setFacebookId(e.target.value)}
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="group relative flex w-full justify-center rounded-md bg-blue-600 py-2.5 px-3 text-sm font-semibold text-white hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-70"
-              >
-                {isLoading ? 'Đang gửi...' : 'Nhận mã OTP'}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form className="mt-8 space-y-6" onSubmit={handleVerifyOTP}>
-            <div className="-space-y-px rounded-md shadow-sm">
-              <div>
-                <label htmlFor="otp" className="sr-only">
-                  Mã OTP
-                </label>
-                <input
-                  id="otp"
-                  name="otp"
-                  type="text"
-                  required
-                  className="relative block w-full rounded-md border-0 py-2.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 text-center text-xl tracking-widest font-mono"
-                  placeholder="------"
-                  maxLength={6}
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <button
-                type="submit"
-                disabled={isLoading || otp.length !== 6}
-                className="group relative flex w-full justify-center rounded-md bg-blue-600 py-2.5 px-3 text-sm font-semibold text-white hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-70"
-              >
-                {isLoading ? 'Đang xác thực...' : 'Đăng nhập'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                disabled={isLoading}
-                className="text-sm font-medium text-blue-600 hover:text-blue-500"
-              >
-                Quay lại
-              </button>
-            </div>
-          </form>
+        {success && (
+          <div className="rounded-md bg-emerald-50 p-4">
+            <h3 className="text-sm font-medium text-emerald-800">{success}</h3>
+          </div>
         )}
+
+        <form className="mt-8 space-y-6" onSubmit={handleRequestMagicLink}>
+          <div className="-space-y-px rounded-md shadow-sm">
+            <div>
+              <label htmlFor="userId" className="block text-sm font-medium text-gray-700 mb-2">
+                Họ và Tên
+              </label>
+              <select
+                id="userId"
+                name="userId"
+                required
+                className="relative block w-full rounded-md border-0 py-2.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 bg-white"
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                disabled={isLoading}
+              >
+                {users.map(u => (
+                  <option key={u.id} value={u.id}>{u.full_name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="submit"
+              disabled={isLoading || !selectedUserId || !!success}
+              className="group relative flex w-full justify-center rounded-md bg-blue-600 py-2.5 px-3 text-sm font-semibold text-white hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Đang gửi...' : 'Nhận link đăng nhập'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
