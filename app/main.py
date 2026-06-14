@@ -762,8 +762,8 @@ async def request_magic_link(req: MagicLinkRequest, db: AsyncSession = Depends(g
     try:
         await handler.send_direct_message(user.facebook_id, msg)
     except Exception as e:
-        logger.log_error("Auth", "request-magic-link", "Failed to send message", {"error": str(e)})
-        raise HTTPException(status_code=500, detail="Không thể gửi tin nhắn qua Facebook. Liên hệ admin.")
+        logger.log_error("Auth", "request-magic-link", "Failed to send message", {"error": str(e), "facebook_id": user.facebook_id})
+        raise HTTPException(status_code=400, detail="Tài khoản của bạn chưa được liên kết với Messenger. Vui lòng nhắn tin cho Fanpage SGroup với cú pháp: 'đăng nhập' để liên kết tài khoản.")
     
     return {"status": "ok", "message": "Magic link sent via Messenger"}
 
