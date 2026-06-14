@@ -27,6 +27,14 @@ from app.database.models import ensure_indexes, get_session, save_session
 from app.jobs.scheduler import JobScheduler
 from app.utils.logger import logger
 
+from app.db import get_db, AsyncSessionLocal
+from app.crud import user as crud_user
+from app.crud import bot as crud_bot
+from app.crud import leave as crud_leave
+from app.crud import financial as crud_financial
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
+
 # Global component instances
 classifier = AIClassifier()
 receiver = FacebookReceiver()
@@ -86,54 +94,112 @@ async def health_check():
 # ------------------------------------------------------------------
 
 @app.get("/api/v1/dashboard")
-async def get_dashboard():
+async def get_dashboard(db: AsyncSession = Depends(get_db)):
     """Get dashboard statistics."""
-    stats = await sheet_manager.get_dashboard_stats()
-    return stats
+    # Compute stats from PostgreSQL
+    active = await crud_user.count_users_by_status(db, "ACTIVE")
+    paused = await crud_user.count_users_by_status(db, "PAUSED")
+    quit_c = await crud_user.count_users_by_status(db, "QUIT")
+    revenue = active * 200000
+    
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).date()
+    training = await crud_leave.get_leaves_in_month(db, month_start, now.date(), "training_leave")
+    meeting = await crud_leave.get_leaves_in_month(db, month_start, now.date(), "meeting_leave")
+    
+    return {
+        "activeMembers": active,
+        "pausedMembers": paused,
+        "quitMembers": quit_c,
+        "monthlyRevenue": revenue,
+        "trainingLeaveCount": training,
+        "meetingLeaveCount": meeting,
+        "lastUpdated": now.isoformat() + "Z"
+    }
 
 @app.get("/api/v1/members")
-async def get_members():
+async def get_members(db: AsyncSession = Depends(get_db)):
     """Get all members."""
-    members = await sheet_manager.get_members()
+    users = await crud_user.get_all_users(db)
+    members = []
+    for u in users:
+        # Get leave counts roughly, or just omit if not strict
+        members.append({
+            "facebookId": u.facebook_id,
+            "name": u.full_name,
+            "activeStatus": u.status.value.lower(),
+            "statusDate": u.updated_at.isoformat(),
+            "feeEligibility": u.fee_eligibility.value.lower(),
+            "feeAmount": 200000 if u.status.value == "ACTIVE" else 0,
+            "trainingLeaveCount": 0, # Optimization: could aggregate
+            "meetingLeaveCount": 0
+        })
     return members
 
 @app.get("/api/v1/manual-reviews")
-async def get_manual_reviews():
+async def get_manual_reviews(db: AsyncSession = Depends(get_db)):
     """Get manual review queue."""
-    reviews = await sheet_manager.get_manual_reviews()
-    return reviews
+    reviews = await crud_bot.get_manual_reviews(db)
+    return [{
+        "recordId": r.id,
+        "messageContent": r.message_content,
+        "senderId": r.sender_id,
+        "senderName": r.sender_name,
+        "timestamp": r.created_at.isoformat() + "Z",
+        "confidence": r.confidence,
+        "reviewed": r.reviewed,
+        "manualClassification": r.manual_classification
+    } for r in reviews]
 
 @app.get("/api/v1/history")
-async def get_history():
+async def get_history(db: AsyncSession = Depends(get_db)):
     """Get recent request history."""
-    history = await sheet_manager.get_recent_requests()
-    return history
+    history = await crud_bot.get_bot_history(db)
+    return [{
+        "recordId": h.id,
+        "timestamp": h.created_at.isoformat() + "Z",
+        "facebookId": h.facebook_id,
+        "requestType": h.request_type,
+        "confidence": h.confidence,
+        "status": h.status
+    } for h in history]
 
 class ResolveReviewRequest(BaseModel):
     finalCategory: str
 
 @app.post("/api/v1/manual-reviews/{record_id}/resolve")
-async def resolve_manual_review(record_id: str, req: ResolveReviewRequest):
+async def resolve_manual_review(record_id: str, req: ResolveReviewRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     """Resolve a manual review and send confirmation."""
     try:
-        review_data = await sheet_manager.resolve_manual_review(record_id, req.finalCategory)
+        updated_review = await crud_bot.resolve_manual_review(db, record_id, req.finalCategory)
+        if not updated_review:
+            raise HTTPException(status_code=404, detail="Review not found")
+            
+        await crud_bot.create_bot_history(db, {
+            "facebook_id": updated_review.sender_id,
+            "request_type": req.finalCategory,
+            "confidence": 1.0,
+            "status": "success"
+        })
         
-        await sheet_manager.record_history({
+        # Background sync to Sheet
+        background_tasks.add_task(sheet_manager.resolve_manual_review, record_id, req.finalCategory)
+        background_tasks.add_task(sheet_manager.record_history, {
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "facebookId": review_data["senderId"],
+            "facebookId": updated_review.sender_id,
             "requestType": req.finalCategory,
             "confidence": 1.0,
             "status": "success"
         })
         
         msg = handler._format_confirmation(req.finalCategory, {})
-        await handler.send_direct_message(review_data["senderId"], msg)
+        await handler.send_direct_message(updated_review.sender_id, msg)
         
-        await sheet_manager.update_dashboard()
         return {"status": "ok"}
     except Exception as exc:
         logger.log_error("Main", "resolve_manual_review", "Error", {"error": exc})
         raise HTTPException(status_code=500, detail=str(exc))
+
 
 
 @app.get("/webhook")
@@ -205,7 +271,9 @@ async def process_message(message_data: dict):
     logger.log_info("Main", "process_message", "Starting message processing workflow", 
                     {"senderId": sender_id})
     
-    try:
+    from app.db import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        try:
         # Load session history
         session = await get_session(sender_id)
         history = session.get("history", [])
@@ -242,7 +310,15 @@ async def process_message(message_data: dict):
                 "timestamp": timestamp
             })
             
-            # Record in manual review sheet
+            # Record in DB and sheet
+            await crud_bot.create_manual_review(db, {
+                "message_content": content,
+                "sender_id": sender_id,
+                "sender_name": profile_name,
+                "confidence": classification.confidence,
+                "reviewed": False,
+                "manual_classification": classification.category
+            })
             await sheet_manager.record_manual_review({
                 "messageContent": content,
                 "senderId": sender_id,
@@ -301,6 +377,12 @@ async def process_message(message_data: dict):
             history.append({"role": "assistant", "content": assistant_reply})
             await save_session(sender_id, history)
             
+            await crud_bot.create_bot_history(db, {
+                "facebook_id": sender_id,
+                "request_type": classification.category,
+                "confidence": classification.confidence,
+                "status": "success"
+            })
             await sheet_manager.record_history({
                 "timestamp": timestamp,
                 "facebookId": sender_id,
@@ -308,7 +390,6 @@ async def process_message(message_data: dict):
                 "confidence": classification.confidence,
                 "status": "success"
             })
-            await sheet_manager.update_dashboard()
             return
             
         # Step 4: Handle Leave Requests
@@ -334,6 +415,18 @@ async def process_message(message_data: dict):
             elif classification.date:
                 date_str = classification.date
                 
+            user = await crud_user.get_user_by_facebook_id(db, sender_id)
+            if not user:
+                user = await crud_user.create_user(db, {"facebook_id": sender_id, "full_name": "Unknown"})
+            from app.models.leave import LeaveTypeEnum
+            from datetime import date
+            l_type = LeaveTypeEnum.TRAINING if classification.category == "training_leave" else LeaveTypeEnum.MONTHLY_MEETING
+            await crud_leave.create_leave_request(db, {
+                "user_id": user.id,
+                "type": l_type,
+                "date": date.today(),
+                "reason": classification.reason
+            })
             await sheet_manager.record_leave_request({
                 "facebookId": sender_id,
                 "requestType": classification.category,
@@ -368,6 +461,8 @@ async def process_message(message_data: dict):
             new_status = "paused" if classification.category == "pause_membership" else "inactive"
             
             try:
+                db_status = "PAUSED" if new_status == "paused" else "QUIT"
+                await crud_user.update_user(db, sender_id, {"status": db_status})
                 await sheet_manager.update_member_status({
                     "facebookId": sender_id,
                     "newStatus": new_status
@@ -389,6 +484,12 @@ async def process_message(message_data: dict):
                 assistant_reply = "Xin lỗi, đã có lỗi xảy ra khi cập nhật trạng thái của bạn. Ban nội bộ sẽ kiểm tra lại nhé."
                 await handler.send_confirmation(sender_id, "error", {})
                 # Record failure and save session, then return early
+                await crud_bot.create_bot_history(db, {
+                    "facebook_id": sender_id,
+                    "request_type": classification.category,
+                    "confidence": classification.confidence,
+                    "status": "failed"
+                })
                 await sheet_manager.record_history({
                     "timestamp": timestamp,
                     "facebookId": sender_id,
@@ -406,6 +507,12 @@ async def process_message(message_data: dict):
         # Step 6: Record history and update dashboard
         logger.log_info("Main", "process_message", "→ Step 6: Updating system records", {"senderId": sender_id})
         
+        await crud_bot.create_bot_history(db, {
+            "facebook_id": sender_id,
+            "request_type": classification.category,
+            "confidence": classification.confidence,
+            "status": "success"
+        })
         await sheet_manager.record_history({
             "timestamp": timestamp,
             "facebookId": sender_id,
@@ -414,23 +521,27 @@ async def process_message(message_data: dict):
             "status": "success"
         })
         
-        await sheet_manager.update_dashboard()
-        
         # Save session history
         history.append({"role": "assistant", "content": assistant_reply})
         await save_session(sender_id, history)
         
         logger.log_info("Main", "process_message", "Message processing workflow completed successfully", {"senderId": sender_id})
         
-    except Exception as exc:
-        logger.log_error("Main", "process_message", "Workflow failed", {"error": exc, "senderId": sender_id})
-        await sheet_manager.record_history({
-            "timestamp": timestamp,
-            "facebookId": sender_id,
-            "requestType": "unclassified",
-            "confidence": 0.0,
-            "status": "failed"
-        })
+        except Exception as exc:
+            logger.log_error("Main", "process_message", "Workflow failed", {"error": exc, "senderId": sender_id})
+            await crud_bot.create_bot_history(db, {
+                "facebook_id": sender_id,
+                "request_type": "unclassified",
+                "confidence": 0.0,
+                "status": "failed"
+            })
+            await sheet_manager.record_history({
+                "timestamp": timestamp,
+                "facebookId": sender_id,
+                "requestType": "unclassified",
+                "confidence": 0.0,
+                "status": "failed"
+            })
 
 # ------------------------------------------------------------------
 # Static Files & React Router Catch-All
