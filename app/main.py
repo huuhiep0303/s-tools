@@ -274,108 +274,238 @@ async def process_message(message_data: dict):
     from app.db import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
         try:
-        # Load session history
-        session = await get_session(sender_id)
-        history = session.get("history", [])
-        
-        # We limit history to last 5 pairs (10 messages) to save tokens
-        recent_history = history[-10:] if len(history) > 10 else history
-        message_data["history"] = recent_history
-        
-        # Step 1: AI Classification
-        logger.log_info("Main", "process_message", "→ Step 1: Starting AI classification", {"senderId": sender_id})
-        classification = await classifier.classify(message_data)
-        
-        # Update history
-        history.append({"role": "user", "content": content})
-        # Assistant response will be added at the end depending on what is sent
-        
-        # Step 2: Manual Review check
-        if classification.manual_review:
-            logger.log_info("Main", "process_message", "→ Step 2: Routing to manual review", {"senderId": sender_id})
-            # Send clarification
-            assistant_reply = await handler.send_clarification_request(sender_id, {
-                "category": classification.category,
-                "date": classification.date,
-                "date_range": classification.date_range,
-                "reason": classification.reason
-            })
+            # Load session history
+            session = await get_session(sender_id)
+            history = session.get("history", [])
             
-            profile_name = await handler.get_user_profile_name(sender_id)
-            # Notify admins
-            await handler.send_admin_notification({
-                "messageContent": content,
-                "senderId": sender_id,
-                "senderName": profile_name,
-                "timestamp": timestamp
-            })
+            # We limit history to last 5 pairs (10 messages) to save tokens
+            recent_history = history[-10:] if len(history) > 10 else history
+            message_data["history"] = recent_history
             
-            # Record in DB and sheet
-            await crud_bot.create_manual_review(db, {
-                "message_content": content,
-                "sender_id": sender_id,
-                "sender_name": profile_name,
-                "confidence": classification.confidence,
-                "reviewed": False,
-                "manual_classification": classification.category
-            })
-            await sheet_manager.record_manual_review({
-                "messageContent": content,
-                "senderId": sender_id,
-                "timestamp": timestamp,
-                "confidence": classification.confidence,
-                "reviewed": False,
-                "manualClassification": classification.category
-            })
+            # Step 1: AI Classification
+            logger.log_info("Main", "process_message", "→ Step 1: Starting AI classification", {"senderId": sender_id})
+            classification = await classifier.classify(message_data)
             
-            history.append({"role": "assistant", "content": assistant_reply})
-            await save_session(sender_id, history)
-            return
-
-        if classification.category == "greeting":
-            logger.log_info("Main", "process_message", "→ Step 3: Handling greeting", {"senderId": sender_id})
-            assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
-            history.append({"role": "assistant", "content": assistant_reply})
-            await save_session(sender_id, history)
-            return
+            # Update history
+            history.append({"role": "user", "content": content})
+            # Assistant response will be added at the end depending on what is sent
             
-        if classification.category == "thanks":
-            logger.log_info("Main", "process_message", "→ Step 3: Handling thanks", {"senderId": sender_id})
-            assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
-            history.append({"role": "assistant", "content": assistant_reply})
-            await save_session(sender_id, history)
-            return
-            
-        if classification.category == "bot_identity":
-            logger.log_info("Main", "process_message", "→ Step 3: Handling FAQ (bot_identity)", {"senderId": sender_id})
-            assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
-            history.append({"role": "assistant", "content": assistant_reply})
-            await save_session(sender_id, history)
-            return
-            
-        if classification.category == "ambiguous_stop":
-            logger.log_info("Main", "process_message", "→ Step 3: Handling ambiguous stop", {"senderId": sender_id})
-            assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category})
-            history.append({"role": "assistant", "content": assistant_reply})
-            await save_session(sender_id, history)
-            return
-            
-        if classification.category in ["faq", "onboarding"]:
-            logger.log_info("Main", "process_message", "→ Step 3: Handling FAQ/Onboarding (RAG)", {"senderId": sender_id})
-            
-            kb_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base.md")
-            kb_content = ""
-            if os.path.exists(kb_path):
-                with open(kb_path, "r", encoding="utf-8") as f:
-                    kb_content = f.read()
-            else:
-                logger.log_warn("Main", "process_message", "knowledge_base.md not found, using empty context")
+            # Step 2: Manual Review check
+            if classification.manual_review:
+                logger.log_info("Main", "process_message", "→ Step 2: Routing to manual review", {"senderId": sender_id})
+                # Send clarification
+                assistant_reply = await handler.send_clarification_request(sender_id, {
+                    "category": classification.category,
+                    "date": classification.date,
+                    "date_range": classification.date_range,
+                    "reason": classification.reason
+                })
+                
+                profile_name = await handler.get_user_profile_name(sender_id)
+                # Notify admins
+                await handler.send_admin_notification({
+                    "messageContent": content,
+                    "senderId": sender_id,
+                    "senderName": profile_name,
+                    "timestamp": timestamp
+                })
+                
+                # Record in DB and sheet
+                await crud_bot.create_manual_review(db, {
+                    "message_content": content,
+                    "sender_id": sender_id,
+                    "sender_name": profile_name,
+                    "confidence": classification.confidence,
+                    "reviewed": False,
+                    "manual_classification": classification.category
+                })
+                await sheet_manager.record_manual_review({
+                    "messageContent": content,
+                    "senderId": sender_id,
+                    "timestamp": timestamp,
+                    "confidence": classification.confidence,
+                    "reviewed": False,
+                    "manualClassification": classification.category
+                })
+                
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                return
+    
+            if classification.category == "greeting":
+                logger.log_info("Main", "process_message", "→ Step 3: Handling greeting", {"senderId": sender_id})
+                assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                return
+                
+            if classification.category == "thanks":
+                logger.log_info("Main", "process_message", "→ Step 3: Handling thanks", {"senderId": sender_id})
+                assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                return
+                
+            if classification.category == "bot_identity":
+                logger.log_info("Main", "process_message", "→ Step 3: Handling FAQ (bot_identity)", {"senderId": sender_id})
+                assistant_reply = await handler.send_confirmation(sender_id, classification.category, {})
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                return
+                
+            if classification.category == "ambiguous_stop":
+                logger.log_info("Main", "process_message", "→ Step 3: Handling ambiguous stop", {"senderId": sender_id})
+                assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category})
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                return
+                
+            if classification.category in ["faq", "onboarding"]:
+                logger.log_info("Main", "process_message", "→ Step 3: Handling FAQ/Onboarding (RAG)", {"senderId": sender_id})
+                
+                kb_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base.md")
+                kb_content = ""
+                if os.path.exists(kb_path):
+                    with open(kb_path, "r", encoding="utf-8") as f:
+                        kb_content = f.read()
+                else:
+                    logger.log_warn("Main", "process_message", "knowledge_base.md not found, using empty context")
+                        
+                assistant_reply = await classifier.answer_faq(content, kb_content, recent_history)
+                await handler.send_direct_message(sender_id, assistant_reply)
+                
+                history.append({"role": "assistant", "content": assistant_reply})
+                await save_session(sender_id, history)
+                
+                await crud_bot.create_bot_history(db, {
+                    "facebook_id": sender_id,
+                    "request_type": classification.category,
+                    "confidence": classification.confidence,
+                    "status": "success"
+                })
+                await sheet_manager.record_history({
+                    "timestamp": timestamp,
+                    "facebookId": sender_id,
+                    "requestType": classification.category,
+                    "confidence": classification.confidence,
+                    "status": "success"
+                })
+                return
+                
+            # Step 4: Handle Leave Requests
+            if classification.category in ["training_leave", "meeting_leave"]:
+                logger.log_info("Main", "process_message", "→ Step 4: Processing leave request", {"senderId": sender_id})
+                
+                # Check for missing info
+                if not (classification.date or classification.date_range) or not classification.reason:
+                    assistant_reply = await handler.send_clarification_request(sender_id, {
+                        "category": classification.category,
+                        "date": classification.date,
+                        "date_range": classification.date_range,
+                        "reason": classification.reason
+                    })
+                    history.append({"role": "assistant", "content": assistant_reply})
+                    await save_session(sender_id, history)
+                    return
+                
+                # Format date for sheet
+                date_str = ""
+                if classification.date_range:
+                    date_str = f"{classification.date_range['start']} to {classification.date_range['end']}"
+                elif classification.date:
+                    date_str = classification.date
                     
-            assistant_reply = await classifier.answer_faq(content, kb_content, recent_history)
-            await handler.send_direct_message(sender_id, assistant_reply)
+                user = await crud_user.get_user_by_facebook_id(db, sender_id)
+                if not user:
+                    user = await crud_user.create_user(db, {"facebook_id": sender_id, "full_name": "Unknown"})
+                from app.models.leave import LeaveTypeEnum
+                from datetime import date
+                l_type = LeaveTypeEnum.TRAINING if classification.category == "training_leave" else LeaveTypeEnum.MONTHLY_MEETING
+                await crud_leave.create_leave_request(db, {
+                    "user_id": user.id,
+                    "type": l_type,
+                    "date": date.today(),
+                    "reason": classification.reason
+                })
+                await sheet_manager.record_leave_request({
+                    "facebookId": sender_id,
+                    "requestType": classification.category,
+                    "date": date_str,
+                    "reason": classification.reason,
+                    "timestamp": timestamp
+                })
+                
+                # Send confirmation
+                assistant_reply = await handler.send_confirmation(sender_id, classification.category, {
+                    "date": date_str,
+                    "reason": classification.reason
+                })
+                
+            # Step 5: Handle Status Updates
+            elif classification.category in ["pause_membership", "quit_membership"]:
+                logger.log_info("Main", "process_message", "→ Step 5: Processing status update", {"senderId": sender_id})
+                
+                # Check for missing info
+                if classification.category == "pause_membership" and not classification.date and not classification.date_range:
+                    assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category})
+                    history.append({"role": "assistant", "content": assistant_reply})
+                    await save_session(sender_id, history)
+                    return
+                    
+                if not classification.reason:
+                    assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category, "date": classification.date, "date_range": classification.date_range})
+                    history.append({"role": "assistant", "content": assistant_reply})
+                    await save_session(sender_id, history)
+                    return
+                
+                new_status = "paused" if classification.category == "pause_membership" else "inactive"
+                
+                try:
+                    db_status = "PAUSED" if new_status == "paused" else "QUIT"
+                    await crud_user.update_user(db, sender_id, {"status": db_status})
+                    await sheet_manager.update_member_status({
+                        "facebookId": sender_id,
+                        "newStatus": new_status
+                    })
+                    
+                    # Format date for reply
+                    date_str = ""
+                    if classification.date_range:
+                        date_str = classification.date_range['start']
+                    elif classification.date:
+                        date_str = classification.date
+                        
+                    assistant_reply = await handler.send_confirmation(sender_id, classification.category, {
+                        "date": date_str
+                    })
+                except Exception as e:
+                    # E.g. member not found or invalid transition
+                    logger.log_error("Main", "process_message", "Failed to update status", {"error": e})
+                    assistant_reply = "Xin lỗi, đã có lỗi xảy ra khi cập nhật trạng thái của bạn. Ban nội bộ sẽ kiểm tra lại nhé."
+                    await handler.send_confirmation(sender_id, "error", {})
+                    # Record failure and save session, then return early
+                    await crud_bot.create_bot_history(db, {
+                        "facebook_id": sender_id,
+                        "request_type": classification.category,
+                        "confidence": classification.confidence,
+                        "status": "failed"
+                    })
+                    await sheet_manager.record_history({
+                        "timestamp": timestamp,
+                        "facebookId": sender_id,
+                        "requestType": classification.category,
+                        "confidence": classification.confidence,
+                        "status": "failed"
+                    })
+                    history.append({"role": "assistant", "content": assistant_reply})
+                    await save_session(sender_id, history)
+                    return
             
-            history.append({"role": "assistant", "content": assistant_reply})
-            await save_session(sender_id, history)
+            else:
+                assistant_reply = await handler.send_clarification_request(sender_id)
+                
+            # Step 6: Record history and update dashboard
+            logger.log_info("Main", "process_message", "→ Step 6: Updating system records", {"senderId": sender_id})
             
             await crud_bot.create_bot_history(db, {
                 "facebook_id": sender_id,
@@ -390,143 +520,13 @@ async def process_message(message_data: dict):
                 "confidence": classification.confidence,
                 "status": "success"
             })
-            return
             
-        # Step 4: Handle Leave Requests
-        if classification.category in ["training_leave", "meeting_leave"]:
-            logger.log_info("Main", "process_message", "→ Step 4: Processing leave request", {"senderId": sender_id})
+            # Save session history
+            history.append({"role": "assistant", "content": assistant_reply})
+            await save_session(sender_id, history)
             
-            # Check for missing info
-            if not (classification.date or classification.date_range) or not classification.reason:
-                assistant_reply = await handler.send_clarification_request(sender_id, {
-                    "category": classification.category,
-                    "date": classification.date,
-                    "date_range": classification.date_range,
-                    "reason": classification.reason
-                })
-                history.append({"role": "assistant", "content": assistant_reply})
-                await save_session(sender_id, history)
-                return
+            logger.log_info("Main", "process_message", "Message processing workflow completed successfully", {"senderId": sender_id})
             
-            # Format date for sheet
-            date_str = ""
-            if classification.date_range:
-                date_str = f"{classification.date_range['start']} to {classification.date_range['end']}"
-            elif classification.date:
-                date_str = classification.date
-                
-            user = await crud_user.get_user_by_facebook_id(db, sender_id)
-            if not user:
-                user = await crud_user.create_user(db, {"facebook_id": sender_id, "full_name": "Unknown"})
-            from app.models.leave import LeaveTypeEnum
-            from datetime import date
-            l_type = LeaveTypeEnum.TRAINING if classification.category == "training_leave" else LeaveTypeEnum.MONTHLY_MEETING
-            await crud_leave.create_leave_request(db, {
-                "user_id": user.id,
-                "type": l_type,
-                "date": date.today(),
-                "reason": classification.reason
-            })
-            await sheet_manager.record_leave_request({
-                "facebookId": sender_id,
-                "requestType": classification.category,
-                "date": date_str,
-                "reason": classification.reason,
-                "timestamp": timestamp
-            })
-            
-            # Send confirmation
-            assistant_reply = await handler.send_confirmation(sender_id, classification.category, {
-                "date": date_str,
-                "reason": classification.reason
-            })
-            
-        # Step 5: Handle Status Updates
-        elif classification.category in ["pause_membership", "quit_membership"]:
-            logger.log_info("Main", "process_message", "→ Step 5: Processing status update", {"senderId": sender_id})
-            
-            # Check for missing info
-            if classification.category == "pause_membership" and not classification.date and not classification.date_range:
-                assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category})
-                history.append({"role": "assistant", "content": assistant_reply})
-                await save_session(sender_id, history)
-                return
-                
-            if not classification.reason:
-                assistant_reply = await handler.send_clarification_request(sender_id, {"category": classification.category, "date": classification.date, "date_range": classification.date_range})
-                history.append({"role": "assistant", "content": assistant_reply})
-                await save_session(sender_id, history)
-                return
-            
-            new_status = "paused" if classification.category == "pause_membership" else "inactive"
-            
-            try:
-                db_status = "PAUSED" if new_status == "paused" else "QUIT"
-                await crud_user.update_user(db, sender_id, {"status": db_status})
-                await sheet_manager.update_member_status({
-                    "facebookId": sender_id,
-                    "newStatus": new_status
-                })
-                
-                # Format date for reply
-                date_str = ""
-                if classification.date_range:
-                    date_str = classification.date_range['start']
-                elif classification.date:
-                    date_str = classification.date
-                    
-                assistant_reply = await handler.send_confirmation(sender_id, classification.category, {
-                    "date": date_str
-                })
-            except Exception as e:
-                # E.g. member not found or invalid transition
-                logger.log_error("Main", "process_message", "Failed to update status", {"error": e})
-                assistant_reply = "Xin lỗi, đã có lỗi xảy ra khi cập nhật trạng thái của bạn. Ban nội bộ sẽ kiểm tra lại nhé."
-                await handler.send_confirmation(sender_id, "error", {})
-                # Record failure and save session, then return early
-                await crud_bot.create_bot_history(db, {
-                    "facebook_id": sender_id,
-                    "request_type": classification.category,
-                    "confidence": classification.confidence,
-                    "status": "failed"
-                })
-                await sheet_manager.record_history({
-                    "timestamp": timestamp,
-                    "facebookId": sender_id,
-                    "requestType": classification.category,
-                    "confidence": classification.confidence,
-                    "status": "failed"
-                })
-                history.append({"role": "assistant", "content": assistant_reply})
-                await save_session(sender_id, history)
-                return
-        
-        else:
-            assistant_reply = await handler.send_clarification_request(sender_id)
-            
-        # Step 6: Record history and update dashboard
-        logger.log_info("Main", "process_message", "→ Step 6: Updating system records", {"senderId": sender_id})
-        
-        await crud_bot.create_bot_history(db, {
-            "facebook_id": sender_id,
-            "request_type": classification.category,
-            "confidence": classification.confidence,
-            "status": "success"
-        })
-        await sheet_manager.record_history({
-            "timestamp": timestamp,
-            "facebookId": sender_id,
-            "requestType": classification.category,
-            "confidence": classification.confidence,
-            "status": "success"
-        })
-        
-        # Save session history
-        history.append({"role": "assistant", "content": assistant_reply})
-        await save_session(sender_id, history)
-        
-        logger.log_info("Main", "process_message", "Message processing workflow completed successfully", {"senderId": sender_id})
-        
         except Exception as exc:
             logger.log_error("Main", "process_message", "Workflow failed", {"error": exc, "senderId": sender_id})
             await crud_bot.create_bot_history(db, {
