@@ -127,16 +127,84 @@ async def get_members(db: AsyncSession = Depends(get_db), token_payload: dict = 
     for u in users:
         # Get leave counts roughly, or just omit if not strict
         members.append({
+            "id": u.id,
             "facebookId": u.facebook_id,
             "name": u.full_name,
-            "activeStatus": u.status.value.lower(),
-            "statusDate": u.updated_at.isoformat(),
-            "feeEligibility": u.fee_eligibility.value.lower(),
-            "feeAmount": 200000 if u.status.value == "ACTIVE" else 0,
+            "activeStatus": u.status.value.lower() if u.status else "quit",
+            "statusDate": u.updated_at.isoformat() if u.updated_at else datetime.utcnow().isoformat(),
+            "feeEligibility": u.fee_eligibility.value.lower() if u.fee_eligibility else "exempt",
+            "feeAmount": 200000 if u.status and u.status.value == "ACTIVE" else 0,
             "trainingLeaveCount": 0, # Optimization: could aggregate
             "meetingLeaveCount": 0
         })
     return members
+
+class MemberCreateUpdate(BaseModel):
+    facebookId: str
+    name: str
+    activeStatus: str
+    feeEligibility: str
+
+@app.post("/api/v1/admin/members")
+async def create_member(req: MemberCreateUpdate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    # map frontend values to DB enums
+    from app.models.user import StatusEnum, FeeEligibilityEnum, RoleEnum
+    status_map = {"active": StatusEnum.ACTIVE, "paused": StatusEnum.PAUSED, "quit": StatusEnum.QUIT}
+    fee_map = {"eligible": FeeEligibilityEnum.ELIGIBLE, "exempt": FeeEligibilityEnum.EXEMPT}
+    
+    user_data = {
+        "facebook_id": req.facebookId,
+        "full_name": req.name,
+        "role": RoleEnum.USER,
+        "status": status_map.get(req.activeStatus.lower(), StatusEnum.ACTIVE),
+        "fee_eligibility": fee_map.get(req.feeEligibility.lower(), FeeEligibilityEnum.ELIGIBLE)
+    }
+    
+    try:
+        user = await crud_user.create_user(db, user_data)
+        return {"status": "ok", "id": user.id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot create user, maybe facebookId already exists. Error: {str(e)}")
+
+@app.put("/api/v1/admin/members/{user_id}")
+async def update_member(user_id: str, req: MemberCreateUpdate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    from app.models.user import StatusEnum, FeeEligibilityEnum
+    status_map = {"active": StatusEnum.ACTIVE, "paused": StatusEnum.PAUSED, "quit": StatusEnum.QUIT}
+    fee_map = {"eligible": FeeEligibilityEnum.ELIGIBLE, "exempt": FeeEligibilityEnum.EXEMPT}
+    
+    update_data = {
+        "facebook_id": req.facebookId,
+        "full_name": req.name,
+        "status": status_map.get(req.activeStatus.lower(), StatusEnum.ACTIVE),
+        "fee_eligibility": fee_map.get(req.feeEligibility.lower(), FeeEligibilityEnum.ELIGIBLE)
+    }
+    
+    try:
+        updated = await crud_user.update_user_by_id(db, user_id, update_data)
+        if not updated:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot update user. Error: {str(e)}")
+
+@app.delete("/api/v1/admin/members/{user_id}")
+async def delete_member(user_id: str, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    try:
+        deleted = await crud_user.delete_user_by_id(db, user_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Cannot delete user. They might have related records (leaves, financials). Try changing status to QUIT instead.")
 
 @app.get("/api/v1/users/me/stats")
 async def get_my_stats(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):

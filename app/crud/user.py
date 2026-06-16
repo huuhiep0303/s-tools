@@ -42,3 +42,23 @@ async def count_users_by_status(db: AsyncSession, status: StatusEnum) -> int:
     from sqlalchemy import func
     result = await db.execute(select(func.count(User.id)).filter(User.status == status))
     return result.scalar() or 0
+
+async def update_user_by_id(db: AsyncSession, user_id: str, update_data: dict) -> Optional[User]:
+    result = await db.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(**update_data)
+        .execution_options(synchronize_session="fetch")
+    )
+    if result.rowcount > 0:
+        await db.commit()
+        return await get_user(db, user_id)
+    return None
+
+async def delete_user_by_id(db: AsyncSession, user_id: str) -> bool:
+    from sqlalchemy import delete
+    result = await db.execute(delete(User).where(User.id == user_id))
+    if result.rowcount > 0:
+        await db.commit()
+        return True
+    return False

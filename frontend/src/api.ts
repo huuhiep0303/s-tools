@@ -83,3 +83,41 @@ export const resolveReview = async (recordId: string, finalCategory: string) => 
   if (!res.ok) throw new Error('Failed to resolve review');
   return res.json();
 };
+
+export const createMember = async (data: any) => {
+  const res = await fetch(`${API_BASE}/v1/admin/members`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to create member');
+  }
+  return res.json();
+};
+
+export const updateMember = async ({ id, data }: { id: string, data: any }) => {
+  const res = await fetch(`${API_BASE}/v1/admin/members/${id}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to update member');
+  }
+  return res.json();
+};
+
+export const deleteMember = async (id: string) => {
+  const res = await fetch(`${API_BASE}/v1/admin/members/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to delete member');
+  }
+  return res.json();
+};
