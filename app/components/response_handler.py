@@ -128,12 +128,7 @@ class ResponseHandler:
             resp = await client.post(
                 f"{FB_API_BASE}/me/messages",
                 params={"access_token": self.page_token},
-                json={
-                    "messaging_type": "MESSAGE_TAG",
-                    "tag": "ACCOUNT_UPDATE",
-                    "recipient": {"id": recipient_id}, 
-                    "message": {"text": message}
-                },
+                json={"recipient": {"id": recipient_id}, "message": {"text": message}},
             )
             if resp.status_code >= 400:
                 raise RuntimeError(
