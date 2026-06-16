@@ -812,8 +812,10 @@ class MagicLinkRequest(BaseModel):
 class MagicLinkVerifyRequest(BaseModel):
     token: str
 
+from fastapi import Request
+
 @app.post("/api/v1/auth/request-magic-link")
-async def request_magic_link(req: MagicLinkRequest, db: AsyncSession = Depends(get_db)):
+async def request_magic_link(req: MagicLinkRequest, request: Request, db: AsyncSession = Depends(get_db)):
     # Verify user exists
     user = await crud_user.get_user(db, req.userId)
     if not user:
@@ -823,7 +825,11 @@ async def request_magic_link(req: MagicLinkRequest, db: AsyncSession = Depends(g
     token_store[magic_token] = user.facebook_id
     
     # Send link via messenger
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    base_url = str(request.base_url).rstrip("/")
+    frontend_url = os.getenv("FRONTEND_URL", base_url)
+    if "localhost" in frontend_url and "railway.app" in base_url:
+        frontend_url = base_url
+        
     login_link = f"{frontend_url}/login?token={magic_token}"
     msg = f"Chào {user.full_name},\nBấm vào link sau để đăng nhập vào Web S-Group (Link có hiệu lực 5 phút):\n{login_link}"
     
