@@ -24,6 +24,7 @@ class User(Base):
     # We use String to store UUID as text in sqlite, or native UUID in Postgres
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     facebook_id = Column(String, unique=True, index=True, nullable=False)
+    phone = Column(String, unique=True, index=True, nullable=True)
     full_name = Column(String, nullable=False)
     
     role = Column(Enum(RoleEnum, name="role_enum", create_type=False), default=RoleEnum.USER, nullable=False)

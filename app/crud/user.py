@@ -13,6 +13,10 @@ async def get_user_by_facebook_id(db: AsyncSession, facebook_id: str) -> Optiona
     result = await db.execute(select(User).filter(User.facebook_id == facebook_id))
     return result.scalars().first()
 
+async def get_user_by_phone(db: AsyncSession, phone: str) -> Optional[User]:
+    result = await db.execute(select(User).filter(User.phone == phone))
+    return result.scalars().first()
+
 async def get_all_users(db: AsyncSession) -> List[User]:
     result = await db.execute(select(User))
     return result.scalars().all()

@@ -67,7 +67,7 @@ export default function Members() {
   const handleOpenCreate = () => {
     setModalMode('create');
     setEditingId(null);
-    setFormData({ facebookId: '', name: '', activeStatus: 'active', feeEligibility: 'eligible', role: 'user' });
+    setFormData({ facebookId: '', phone: '', name: '', activeStatus: 'active', feeEligibility: 'eligible', role: 'user' });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -77,6 +77,7 @@ export default function Members() {
     setEditingId(member.id);
     setFormData({
       facebookId: member.facebookId,
+      phone: member.phone || '',
       name: member.name,
       activeStatus: member.activeStatus,
       feeEligibility: member.feeEligibility,
@@ -137,6 +138,7 @@ export default function Members() {
                 <tr className="bg-slate-50/50 border-b border-slate-200 text-sm font-medium text-slate-500 whitespace-nowrap">
                   <th className="px-6 py-4">Họ và Tên</th>
                   <th className="px-6 py-4">Facebook PSID</th>
+                  <th className="px-6 py-4">SĐT</th>
                   <th className="px-6 py-4">Trạng thái</th>
                   <th className="px-6 py-4">Tình trạng quỹ</th>
                   <th className="px-6 py-4">Quyền</th>
@@ -148,7 +150,8 @@ export default function Members() {
                 {filteredMembers?.map((member: any) => (
                   <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">{member.name || 'Unknown'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-500 font-mono">{member.facebookId}</td>
+                    <td className="px-6 py-4 font-mono text-sm text-slate-500">{member.facebookId}</td>
+                    <td className="px-6 py-4 font-mono text-sm text-slate-500">{member.phone || '-'}</td>
                     <td className="px-6 py-4">
                       <span className={cn(
                         "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border uppercase",
@@ -288,6 +291,17 @@ export default function Members() {
                   placeholder="Ví dụ: 1234567890123456"
                 />
                 <p className="mt-1 text-xs text-slate-500">Phải là Page-Scoped ID hợp lệ từ Messenger</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Số điện thoại (Nhận diện nộp quỹ SePay)</label>
+                <input
+                  type="text"
+                  value={formData.phone}
+                  onChange={e => setFormData({...formData, phone: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
+                  placeholder="Ví dụ: 0987654321"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">

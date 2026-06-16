@@ -250,8 +250,9 @@ Hướng dẫn confidence:
     def _build_faq_prompt(self, question: str, context: str, history: list) -> str:
         """Build the prompt for answering FAQs using the knowledge base."""
         parts = [
-            "Bạn là một trợ lý ảo của Ban Nội Bộ S-Group. Hãy dựa vào TÀI LIỆU NỘI QUY dưới đây để trả lời câu hỏi của thành viên một cách thân thiện, ngắn gọn và dễ hiểu.",
-            "Tuyệt đối KHÔNG tự bịa ra thông tin ngoài tài liệu. Nếu câu hỏi không có trong tài liệu, hãy trả lời: 'Xin lỗi, mình chưa có thông tin về vấn đề này. Bạn có thể hỏi trực tiếp Ban Nội Bộ nhé!'",
+            "Bạn là trợ lý ban Kỷ Luật của S-Group. Hãy dựa vào TÀI LIỆU NỘI QUY dưới đây để trả lời câu hỏi của thành viên.",
+            "YÊU CẦU QUAN TRỌNG: Trả lời thật ngắn gọn, đi thẳng vào vấn đề. BẮT BUỘC trích dẫn rõ hình phạt (nếu có) để răn đe thành viên (Ví dụ: 'Phạt 10k', 'Nhắc nhở', 'Cảnh cáo', 'Dừng hoạt động').",
+            "Tuyệt đối KHÔNG tự bịa ra thông tin ngoài tài liệu. Nếu câu hỏi không có trong tài liệu, hãy trả lời ngắn gọn: 'Không có quy định này, vui lòng hỏi Ban Nội Bộ.'",
             "\n--- TÀI LIỆU NỘI QUY S-GROUP ---",
             context,
             "-----------------------------------\n"

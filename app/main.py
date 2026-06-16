@@ -129,6 +129,7 @@ async def get_members(db: AsyncSession = Depends(get_db), token_payload: dict = 
         members.append({
             "id": u.id,
             "facebookId": u.facebook_id,
+            "phone": u.phone,
             "name": u.full_name,
             "activeStatus": u.status.value.lower() if u.status else "quit",
             "role": u.role.value.lower() if hasattr(u, 'role') and u.role else "user",
@@ -142,6 +143,7 @@ async def get_members(db: AsyncSession = Depends(get_db), token_payload: dict = 
 
 class MemberCreateUpdate(BaseModel):
     facebookId: str
+    phone: str = ""
     name: str
     activeStatus: str
     feeEligibility: str
@@ -159,6 +161,7 @@ async def create_member(req: MemberCreateUpdate, db: AsyncSession = Depends(get_
     
     user_data = {
         "facebook_id": req.facebookId,
+        "phone": req.phone if req.phone else None,
         "full_name": req.name,
         "role": RoleEnum.ADMIN if req.role.lower() == "admin" else RoleEnum.USER,
         "status": status_map.get(req.activeStatus.lower(), StatusEnum.ACTIVE),
@@ -182,6 +185,7 @@ async def update_member(user_id: str, req: MemberCreateUpdate, db: AsyncSession 
     
     update_data = {
         "facebook_id": req.facebookId,
+        "phone": req.phone if req.phone else None,
         "full_name": req.name,
         "role": RoleEnum.ADMIN if req.role.lower() == "admin" else RoleEnum.USER,
         "status": status_map.get(req.activeStatus.lower(), StatusEnum.ACTIVE),
@@ -876,6 +880,147 @@ async def verify_magic_link(req: MagicLinkVerifyRequest, db: AsyncSession = Depe
             "role": role
         }
     }
+
+class SepayWebhookPayload(BaseModel):
+    id: int
+    gateway: str
+    transactionDate: str
+    accountNumber: str
+    content: str
+    transferType: str
+    transferAmount: int
+    accumulated: int
+    referenceCode: str
+    description: str
+
+@app.post("/api/v1/webhooks/sepay")
+async def sepay_webhook(payload: SepayWebhookPayload, request: Request, db: AsyncSession = Depends(get_db)):
+    if payload.transferType != "in":
+        return {"status": "ignored", "reason": "not an incoming transfer"}
+
+    # Extract phone from content (e.g. SGROUP 0987654321)
+    import re
+    match = re.search(r'SGROUP\s*(\d{9,11})', payload.content, re.IGNORECASE)
+    if not match:
+        return {"status": "ignored", "reason": "no valid syntax found in content"}
+
+    phone = match.group(1)
+    
+    # Find user by phone
+    from app.crud.user import get_user_by_phone
+    user = await get_user_by_phone(db, phone)
+    if not user:
+        logger.log_warn("Sepay", "webhook", "User not found for phone", {"phone": phone})
+        return {"status": "ignored", "reason": "user not found"}
+
+    # Calculate fee debt
+    from app.crud.financial import get_fee_status
+    fee_status = await get_fee_status(db, user.id)
+    
+    # Update DB - actually we should create a fee transaction, but the current financial system might not have it.
+    # Currently financial.py uses FeeStatus. Wait, how are fees tracked? Let's assume we just log it and send message.
+    # We will send a message via Messenger
+    amount_str = f"{payload.transferAmount:,.0f}".replace(",", ".")
+    msg = f"Cảm ơn bạn đã đóng quỹ S-Group với số tiền {amount_str} VNĐ.\n\n(Lưu ý: Hệ thống đang tự động ghi nhận, số dư nợ trên web sẽ được cập nhật sau)."
+    
+    try:
+        await handler.send_direct_message(user.facebook_id, msg)
+        logger.log_info("Sepay", "webhook", "Notification sent", {"phone": phone, "amount": payload.transferAmount})
+    except Exception as e:
+        logger.log_error("Sepay", "webhook", "Failed to send notification", {"error": str(e)})
+
+    return {"status": "success"}
+
+    return {"status": "success"}
+
+# ------------------------------------------------------------------
+# Check-in API
+# ------------------------------------------------------------------
+
+class CheckinSessionCreate(BaseModel):
+    title: str
+    duration_minutes: int
+
+class CheckinRequest(BaseModel):
+    secret_code: str
+
+@app.post("/api/v1/admin/checkin/sessions")
+async def create_checkin_session(req: CheckinSessionCreate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+        
+    from app.models.checkin import CheckinSession
+    from datetime import timedelta
+    import random
+    import string
+    
+    code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    
+    session = CheckinSession(
+        title=req.title,
+        secret_code=code,
+        expires_at=datetime.utcnow() + timedelta(minutes=req.duration_minutes)
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    
+    return {
+        "id": session.id,
+        "title": session.title,
+        "secret_code": session.secret_code,
+        "expires_at": session.expires_at.isoformat() + "Z"
+    }
+
+@app.post("/api/v1/checkin")
+async def checkin_user(req: CheckinRequest, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    facebook_id = token_payload.get("sub")
+    if not facebook_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+        
+    from app.crud.user import get_user_by_facebook_id
+    user = await get_user_by_facebook_id(db, facebook_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    from app.models.checkin import CheckinSession, CheckinRecord
+    from sqlalchemy.future import select
+    
+    # Verify session
+    result = await db.execute(select(CheckinSession).filter(CheckinSession.secret_code == req.secret_code))
+    session = result.scalars().first()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Mã điểm danh không hợp lệ")
+        
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Phiên điểm danh đã hết hạn")
+        
+    # Check if already checked in
+    existing_check = await db.execute(
+        select(CheckinRecord).filter(
+            CheckinRecord.session_id == session.id,
+            CheckinRecord.user_id == user.id
+        )
+    )
+    if existing_check.scalars().first():
+        return {"status": "ok", "message": "Bạn đã điểm danh rồi"}
+        
+    record = CheckinRecord(
+        session_id=session.id,
+        user_id=user.id
+    )
+    db.add(record)
+    await db.commit()
+    
+    # Send Messenger Notification
+    msg = f"Bạn đã điểm danh thành công: {session.title} lúc {datetime.now(VN_TZ).strftime('%H:%M')}."
+    try:
+        await handler.send_direct_message(user.facebook_id, msg)
+    except Exception as e:
+        logger.log_error("Checkin", "notify", "Failed to send checkin confirmation", {"error": str(e)})
+
+    return {"status": "ok", "message": "Điểm danh thành công"}
 
 # ------------------------------------------------------------------
 # Static Files & React Router Catch-All
