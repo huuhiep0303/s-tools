@@ -862,8 +862,8 @@ async def verify_magic_link(req: MagicLinkVerifyRequest, db: AsyncSession = Depe
         "role": role
     })
     
-    # Clear token
-    del token_store[req.token]
+    # Clear token safely
+    token_store.pop(req.token, None)
     
     return {
         "access_token": token,

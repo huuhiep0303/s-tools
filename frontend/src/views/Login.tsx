@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getPublicUsers, requestMagicLink, verifyMagicLink } from '../api';
@@ -14,6 +14,7 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const verifyAttempted = useRef(false);
   
   const from = location.state?.from?.pathname || '/dashboard';
 
@@ -30,7 +31,8 @@ export default function Login() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     
-    if (token) {
+    if (token && !verifyAttempted.current) {
+      verifyAttempted.current = true;
       setIsVerifying(true);
       verifyMagicLink(token)
         .then(data => {
