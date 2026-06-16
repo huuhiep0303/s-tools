@@ -23,9 +23,9 @@ export default function Members() {
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingId, setEditingId] = useState<string | null>(null);
   
-  // Form state
   const [formData, setFormData] = useState({
     facebookId: '',
+    phone: '',
     name: '',
     activeStatus: 'active',
     feeEligibility: 'eligible',
