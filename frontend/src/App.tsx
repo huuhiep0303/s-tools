@@ -5,6 +5,7 @@ import Dashboard from './views/Dashboard';
 import Members from './views/Members';
 import Reviews from './views/Reviews';
 import Login from './views/Login';
+import Profile from './views/user/Profile';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -29,6 +30,7 @@ function App() {
               <Route element={<Layout />}>
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard />} />
+                <Route path="profile" element={<Profile />} />
                 
                 {/* Admin only routes */}
                 <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
