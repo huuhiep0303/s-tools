@@ -131,6 +131,7 @@ async def get_members(db: AsyncSession = Depends(get_db), token_payload: dict = 
             "facebookId": u.facebook_id,
             "name": u.full_name,
             "activeStatus": u.status.value.lower() if u.status else "quit",
+            "role": u.role.value.lower() if hasattr(u, 'role') and u.role else "user",
             "statusDate": u.updated_at.isoformat() if u.updated_at else datetime.utcnow().isoformat(),
             "feeEligibility": u.fee_eligibility.value.lower() if u.fee_eligibility else "exempt",
             "feeAmount": 200000 if u.status and u.status.value == "ACTIVE" else 0,
@@ -144,6 +145,7 @@ class MemberCreateUpdate(BaseModel):
     name: str
     activeStatus: str
     feeEligibility: str
+    role: str = "user"
 
 @app.post("/api/v1/admin/members")
 async def create_member(req: MemberCreateUpdate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
@@ -158,7 +160,7 @@ async def create_member(req: MemberCreateUpdate, db: AsyncSession = Depends(get_
     user_data = {
         "facebook_id": req.facebookId,
         "full_name": req.name,
-        "role": RoleEnum.USER,
+        "role": RoleEnum.ADMIN if req.role.lower() == "admin" else RoleEnum.USER,
         "status": status_map.get(req.activeStatus.lower(), StatusEnum.ACTIVE),
         "fee_eligibility": fee_map.get(req.feeEligibility.lower(), FeeEligibilityEnum.ELIGIBLE)
     }
@@ -181,6 +183,7 @@ async def update_member(user_id: str, req: MemberCreateUpdate, db: AsyncSession 
     update_data = {
         "facebook_id": req.facebookId,
         "full_name": req.name,
+        "role": RoleEnum.ADMIN if req.role.lower() == "admin" else RoleEnum.USER,
         "status": status_map.get(req.activeStatus.lower(), StatusEnum.ACTIVE),
         "fee_eligibility": fee_map.get(req.feeEligibility.lower(), FeeEligibilityEnum.ELIGIBLE)
     }
@@ -852,9 +855,8 @@ async def verify_magic_link(req: MagicLinkVerifyRequest, db: AsyncSession = Depe
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    # For now, admin if facebook_id in ADMIN_FACEBOOK_IDS env (or just assign user role)
-    admin_ids = os.getenv("ADMIN_FACEBOOK_IDS", "").split(",")
-    role = "admin" if facebook_id in admin_ids else "user"
+    # Get user to determine role
+    role = user.role.value.lower()
     
     token = create_access_token({
         "sub": facebook_id,

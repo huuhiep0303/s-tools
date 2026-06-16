@@ -28,7 +28,8 @@ export default function Members() {
     facebookId: '',
     name: '',
     activeStatus: 'active',
-    feeEligibility: 'eligible'
+    feeEligibility: 'eligible',
+    role: 'user'
   });
   const [formError, setFormError] = useState('');
 
@@ -66,7 +67,7 @@ export default function Members() {
   const handleOpenCreate = () => {
     setModalMode('create');
     setEditingId(null);
-    setFormData({ facebookId: '', name: '', activeStatus: 'active', feeEligibility: 'eligible' });
+    setFormData({ facebookId: '', name: '', activeStatus: 'active', feeEligibility: 'eligible', role: 'user' });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -78,7 +79,8 @@ export default function Members() {
       facebookId: member.facebookId,
       name: member.name,
       activeStatus: member.activeStatus,
-      feeEligibility: member.feeEligibility
+      feeEligibility: member.feeEligibility,
+      role: member.role || 'user'
     });
     setFormError('');
     setIsModalOpen(true);
@@ -137,6 +139,7 @@ export default function Members() {
                   <th className="px-6 py-4">Facebook PSID</th>
                   <th className="px-6 py-4">Trạng thái</th>
                   <th className="px-6 py-4">Tình trạng quỹ</th>
+                  <th className="px-6 py-4">Quyền</th>
                   <th className="px-6 py-4 text-center">Nghỉ phép</th>
                   <th className="px-6 py-4 text-right">Hành động</th>
                 </tr>
@@ -166,6 +169,17 @@ export default function Members() {
                       ) : (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                           <CheckCircle size={14} /> Đã đóng
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {member.role === 'admin' ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                          Admin
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200">
+                          User
                         </span>
                       )}
                     </td>
@@ -249,6 +263,18 @@ export default function Members() {
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Ví dụ: Nguyễn Văn A"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Quyền hạn (Role)</label>
+                <select
+                  value={formData.role}
+                  onChange={e => setFormData({...formData, role: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="user">User (Thành viên)</option>
+                  <option value="admin">Admin (Quản trị viên)</option>
+                </select>
               </div>
 
               <div>
