@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Users, ClipboardCheck, Settings, LogOut, MessageSquare, User, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Users, ClipboardCheck, LogOut, MessageSquare, User, ChevronDown } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
