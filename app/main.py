@@ -176,7 +176,7 @@ async def update_member(user_id: str, req: MemberCreateUpdate, db: AsyncSession 
     if token_payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
         
-    from app.models.user import StatusEnum, FeeEligibilityEnum
+    from app.models.user import StatusEnum, FeeEligibilityEnum, RoleEnum
     status_map = {"active": StatusEnum.ACTIVE, "paused": StatusEnum.PAUSED, "quit": StatusEnum.QUIT}
     fee_map = {"eligible": FeeEligibilityEnum.ELIGIBLE, "exempt": FeeEligibilityEnum.EXEMPT}
     
