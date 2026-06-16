@@ -20,7 +20,10 @@ export const requestMagicLink = async (userId: string) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId }),
   });
-  if (!res.ok) throw new Error('Failed to request magic link');
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || 'Failed to request magic link');
+  }
   return res.json();
 };
 
