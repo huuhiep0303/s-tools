@@ -4,12 +4,14 @@ import { fetchCourses, createCourse, fetchCourseSessions, createCourseSession, f
 import { BookOpen, Calendar, Users, Plus, X, Trash2, Link as LinkIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useAuth } from '../contexts/AuthContext';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
 export default function Classes() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
   
@@ -19,7 +21,7 @@ export default function Classes() {
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   
   // Form states
-  const [courseForm, setCourseForm] = useState({ name: '', description: '' });
+  const [courseForm, setCourseForm] = useState({ name: '', description: '', mentor_id: '' });
   const [sessionForm, setSessionForm] = useState({ session_number: '', title: '', date: '', materials_url: '', homework_desc: '', homework_deadline: '' });
   const [memberForm, setMemberForm] = useState({ userId: '' });
 
@@ -52,7 +54,7 @@ export default function Classes() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['courses'] });
       setIsCourseModalOpen(false);
-      setCourseForm({ name: '', description: '' });
+      setCourseForm({ name: '', description: '', mentor_id: '' });
     }
   });
 
@@ -272,6 +274,21 @@ export default function Classes() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Mô tả (Tùy chọn)</label>
                 <textarea rows={3} value={courseForm.description} onChange={e => setCourseForm({...courseForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Mô tả tóm tắt lớp học" />
               </div>
+              {user?.role === 'admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Chọn Mentor (Admin only)</label>
+                  <select
+                    value={courseForm.mentor_id}
+                    onChange={e => setCourseForm({...courseForm, mentor_id: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                  >
+                    <option value="">-- Mặc định (Chính bạn) --</option>
+                    {allUsers?.map((u: any) => (
+                      <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <button type="submit" disabled={createCourseMut.isPending} className="w-full bg-blue-600 text-white rounded-lg py-2.5 font-medium hover:bg-blue-700 transition-colors">
                 {createCourseMut.isPending ? "Đang tạo..." : "Tạo Lớp"}
               </button>

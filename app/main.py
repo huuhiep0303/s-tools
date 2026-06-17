@@ -1059,6 +1059,7 @@ async def checkin_user(req: CheckinRequest, db: AsyncSession = Depends(get_db), 
 class CourseCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    mentor_id: Optional[str] = None
 
 class CourseSessionCreate(BaseModel):
     session_number: str
@@ -1089,7 +1090,8 @@ async def get_courses(db: AsyncSession = Depends(get_db), token_payload: dict = 
 
 @app.post("/api/v1/training/courses")
 async def create_course_api(req: CourseCreate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
-    if token_payload.get("role") not in ["admin", "mentor"]:
+    role = token_payload.get("role")
+    if role not in ["admin", "mentor"]:
         raise HTTPException(status_code=403, detail="Admin/Mentor only")
     
     user = await crud_user.get_user_by_facebook_id(db, token_payload.get("sub"))
@@ -1097,7 +1099,14 @@ async def create_course_api(req: CourseCreate, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=404, detail="User not found")
         
     data = req.model_dump()
-    data["mentor_id"] = user.id
+    
+    # If admin and mentor_id is provided, use it. Otherwise default to current user.
+    if role == "admin" and data.get("mentor_id"):
+        # We trust the provided mentor_id, but it should exist. The DB foreign key will enforce it.
+        pass
+    else:
+        data["mentor_id"] = user.id
+        
     course = await crud_training.create_course(db, data)
     return {"status": "ok", "id": course.id}
 
