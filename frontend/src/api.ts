@@ -124,3 +124,60 @@ export const deleteMember = async (id: string) => {
   }
   return res.json();
 };
+
+export const fetchCourses = async () => {
+  const res = await fetch(`${API_BASE}/v1/training/courses`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch courses');
+  return res.json();
+};
+
+export const createCourse = async (data: any) => {
+  const res = await fetch(`${API_BASE}/v1/training/courses`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create course');
+  return res.json();
+};
+
+export const fetchCourseSessions = async (courseId: string) => {
+  const res = await fetch(`${API_BASE}/v1/training/courses/${courseId}/sessions`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch course sessions');
+  return res.json();
+};
+
+export const createCourseSession = async ({ courseId, data }: { courseId: string, data: any }) => {
+  const res = await fetch(`${API_BASE}/v1/training/courses/${courseId}/sessions`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create course session');
+  return res.json();
+};
+
+export const fetchCourseMembers = async (courseId: string) => {
+  const res = await fetch(`${API_BASE}/v1/training/courses/${courseId}/members`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch course members');
+  return res.json();
+};
+
+export const addCourseMember = async ({ courseId, userId }: { courseId: string, userId: string }) => {
+  const res = await fetch(`${API_BASE}/v1/training/courses/${courseId}/members`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) throw new Error('Failed to add course member');
+  return res.json();
+};
+
+export const removeCourseMember = async ({ courseId, userId }: { courseId: string, userId: string }) => {
+  const res = await fetch(`${API_BASE}/v1/training/courses/${courseId}/members/${userId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to remove course member');
+  return res.json();
+};

@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-type Role = 'admin' | 'user';
+type Role = 'admin' | 'mentor' | 'user';
 
 interface User {
   facebookId: string;
   name: string;
   role: Role;
+  id?: string;
 }
 
 interface AuthContextType {

@@ -20,7 +20,7 @@ from app.utils.logger import logger
 VALID_CATEGORIES = {
     "training_leave", "meeting_leave", "pause_membership",
     "quit_membership", "bot_identity", "unclassified",
-    "greeting", "thanks", "ambiguous_stop", "faq", "onboarding"
+    "greeting", "thanks", "ambiguous_stop", "faq", "onboarding", "training_query"
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -54,6 +54,7 @@ Hãy thực hiện ĐỒNG THỜI 2 việc:
    - bot_identity     → hỏi bạn là ai / vai trò của bạn / bot dùng để làm gì
    - faq              → hỏi đáp về các quy định, nội quy, giờ giấc, tiền quỹ, xử phạt, hoặc thắc mắc chung về S-Group
    - onboarding       → hỏi cách tham gia S-Group, cách hoạt động, các câu hỏi của người mới
+   - training_query   → hỏi đáp về lịch học, bài tập về nhà, tài liệu học tập, deadline của các buổi đào tạo
    - unclassified     → không rõ / không khớp category nào ở trên
 
    LƯU Ý QUAN TRỌNG VỀ NGỮ CẢNH HỘI THOẠI:

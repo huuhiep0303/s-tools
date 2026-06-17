@@ -7,6 +7,7 @@ from app.db import Base
 
 class RoleEnum(str, enum.Enum):
     ADMIN = "ADMIN"
+    MENTOR = "MENTOR"
     USER = "USER"
 
 class StatusEnum(str, enum.Enum):

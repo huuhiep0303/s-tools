@@ -20,7 +20,7 @@ export default function UserDashboard() {
   const leaveMutation = useMutation({
     mutationFn: () => submitLeaveRequest(leaveType, leaveDate, leaveReason),
     onSuccess: () => {
-      alert("Đã gửi đơn xin nghỉ thành công! Bot sẽ gửi thông báo đến Facebook của bạn.");
+      alert("Đã gửi và duyệt đơn xin nghỉ thành công! Bot sẽ gửi thông báo đến Facebook của bạn.");
       setLeaveDate('');
       setLeaveReason('');
       queryClient.invalidateQueries({ queryKey: ['userStats'] });

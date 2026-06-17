@@ -276,6 +276,7 @@ export default function Members() {
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   <option value="user">User (Thành viên)</option>
+                  <option value="mentor">Mentor (Người hướng dẫn)</option>
                   <option value="admin">Admin (Quản trị viên)</option>
                 </select>
               </div>

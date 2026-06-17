@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Users, ClipboardCheck, LogOut, MessageSquare, User, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Users, ClipboardCheck, LogOut, MessageSquare, User, ChevronDown, BookOpen } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -31,7 +31,8 @@ export default function Layout() {
   };
 
   const navItems = [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'user'] },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'mentor', 'user'] },
+    { to: '/classes', icon: BookOpen, label: 'Classes', roles: ['admin', 'mentor'] },
     { to: '/members', icon: Users, label: 'Members', roles: ['admin'] },
     { to: '/reviews', icon: ClipboardCheck, label: 'Manual Reviews', roles: ['admin'] },
   ];

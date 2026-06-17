@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import Dashboard from './views/Dashboard';
 import Members from './views/Members';
 import Reviews from './views/Reviews';
+import Classes from './views/Classes';
 import Login from './views/Login';
 import Profile from './views/user/Profile';
 import { AuthProvider } from './contexts/AuthContext';
@@ -32,6 +33,11 @@ function App() {
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="profile" element={<Profile />} />
                 
+                {/* Admin and Mentor routes */}
+                <Route element={<ProtectedRoute allowedRoles={['admin', 'mentor']} />}>
+                  <Route path="classes" element={<Classes />} />
+                </Route>
+
                 {/* Admin only routes */}
                 <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
                   <Route path="members" element={<Members />} />

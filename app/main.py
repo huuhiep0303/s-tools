@@ -33,6 +33,7 @@ from app.crud import user as crud_user
 from app.crud import bot as crud_bot
 from app.crud import leave as crud_leave
 from app.crud import financial as crud_financial
+from app.crud import training as crud_training
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 from app.auth import verify_token
@@ -278,13 +279,13 @@ async def submit_leave_request(req: LeaveSubmitRequest, db: AsyncSession = Depen
         "type": req.type,
         "date": leave_date,
         "reason": req.reason,
-        "status": "PENDING"
+        "status": "APPROVED"
     }
     
     await crud_leave.create_leave_request(db, leave_data)
     
     # Send confirmation message
-    msg = f"S-Group đã nhận đơn xin nghỉ của bạn:\nLoại: {'Đào tạo' if req.type == 'training_leave' else 'Họp tháng'}\nNgày: {req.date}\nLý do: {req.reason}\nTrạng thái: CHỜ DUYỆT"
+    msg = f"S-Group đã nhận và duyệt đơn xin nghỉ của bạn:\nLoại: {'Đào tạo' if req.type == 'training_leave' else 'Họp tháng'}\nNgày: {req.date}\nLý do: {req.reason}\nTrạng thái: ĐÃ DUYỆT"
     await handler.send_direct_message(facebook_id, msg)
     
     return {"status": "ok", "message": "Leave request submitted successfully"}
@@ -615,8 +616,8 @@ async def process_message(message_data: dict):
                 await save_session(sender_id, history)
                 return
                 
-            if classification.category in ["faq", "onboarding"]:
-                logger.log_info("Main", "process_message", "→ Step 3: Handling FAQ/Onboarding (RAG)", {"senderId": sender_id})
+            if classification.category in ["faq", "onboarding", "training_query"]:
+                logger.log_info("Main", "process_message", f"→ Step 3: Handling {classification.category} (RAG)", {"senderId": sender_id})
                 
                 kb_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base.md")
                 kb_content = ""
@@ -625,6 +626,33 @@ async def process_message(message_data: dict):
                         kb_content = f.read()
                 else:
                     logger.log_warn("Main", "process_message", "knowledge_base.md not found, using empty context")
+                
+                # If it's a training query, append course context
+                if classification.category == "training_query":
+                    user = await crud_user.get_user_by_facebook_id(db, sender_id)
+                    if user:
+                        course_memberships = await crud_training.get_courses_by_user(db, user.id)
+                        if course_memberships:
+                            kb_content += "\n\n=== THÔNG TIN LỚP ĐÀO TẠO CỦA BẠN ===\n"
+                            for cm in course_memberships:
+                                course = await crud_training.get_course_by_id(db, cm.course_id)
+                                if course:
+                                    kb_content += f"\nLớp: {course.name} ({course.description or 'Không có mô tả'})\n"
+                                    sessions = await crud_training.get_sessions_by_course(db, course.id)
+                                    for s in sessions:
+                                        kb_content += f" - {s.session_number}: {s.title}\n"
+                                        if s.date:
+                                            kb_content += f"   Ngày học: {s.date.strftime('%Y-%m-%d %H:%M')}\n"
+                                        if s.materials_url:
+                                            kb_content += f"   Tài liệu: {s.materials_url}\n"
+                                        if s.homework_desc:
+                                            kb_content += f"   Bài tập: {s.homework_desc}\n"
+                                        if s.homework_deadline:
+                                            kb_content += f"   Hạn nộp (Deadline): {s.homework_deadline.strftime('%Y-%m-%d %H:%M')}\n"
+                        else:
+                            kb_content += "\n\n(Bạn hiện chưa tham gia lớp đào tạo nào trên hệ thống.)\n"
+                    else:
+                        kb_content += "\n\n(Không tìm thấy thông tin tài khoản của bạn trên hệ thống, vui lòng đăng nhập để xem thông tin lớp học.)\n"
                         
                 assistant_reply = await classifier.answer_faq(content, kb_content, recent_history)
                 await handler.send_direct_message(sender_id, assistant_reply)
@@ -680,7 +708,8 @@ async def process_message(message_data: dict):
                     "user_id": user.id,
                     "type": l_type,
                     "date": date.today(),
-                    "reason": classification.reason
+                    "reason": classification.reason,
+                    "status": "APPROVED"
                 })
                 await sheet_manager.record_leave_request({
                     "facebookId": sender_id,
@@ -1021,6 +1050,128 @@ async def checkin_user(req: CheckinRequest, db: AsyncSession = Depends(get_db), 
         logger.log_error("Checkin", "notify", "Failed to send checkin confirmation", {"error": str(e)})
 
     return {"status": "ok", "message": "Điểm danh thành công"}
+
+# ------------------------------------------------------------------
+# Training API (Admin & Mentor)
+# ------------------------------------------------------------------
+
+class CourseCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class CourseSessionCreate(BaseModel):
+    session_number: str
+    title: str
+    date: Optional[str] = None
+    materials_url: Optional[str] = None
+    homework_desc: Optional[str] = None
+    homework_deadline: Optional[str] = None
+
+@app.get("/api/v1/training/courses")
+async def get_courses(db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+    
+    courses = await crud_training.get_all_courses(db)
+    result = []
+    for c in courses:
+        mentor = await crud_user.get_user(db, c.mentor_id)
+        result.append({
+            "id": c.id,
+            "name": c.name,
+            "description": c.description,
+            "mentorId": c.mentor_id,
+            "mentorName": mentor.full_name if mentor else "Unknown",
+            "createdAt": c.created_at.isoformat() + "Z" if c.created_at else None
+        })
+    return result
+
+@app.post("/api/v1/training/courses")
+async def create_course_api(req: CourseCreate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+    
+    user = await crud_user.get_user_by_facebook_id(db, token_payload.get("sub"))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    data = req.model_dump()
+    data["mentor_id"] = user.id
+    course = await crud_training.create_course(db, data)
+    return {"status": "ok", "id": course.id}
+
+@app.get("/api/v1/training/courses/{course_id}/sessions")
+async def get_course_sessions(course_id: str, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+        
+    sessions = await crud_training.get_sessions_by_course(db, course_id)
+    return [{
+        "id": s.id,
+        "sessionNumber": s.session_number,
+        "title": s.title,
+        "date": s.date.isoformat() + "Z" if s.date else None,
+        "materialsUrl": s.materials_url,
+        "homeworkDesc": s.homework_desc,
+        "homeworkDeadline": s.homework_deadline.isoformat() + "Z" if s.homework_deadline else None
+    } for s in sessions]
+
+@app.post("/api/v1/training/courses/{course_id}/sessions")
+async def create_session_api(course_id: str, req: CourseSessionCreate, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+        
+    data = req.model_dump()
+    data["course_id"] = course_id
+    
+    if data.get("date"):
+        try:
+            data["date"] = datetime.fromisoformat(data["date"].replace("Z", "+00:00")).replace(tzinfo=None)
+        except: pass
+    if data.get("homework_deadline"):
+        try:
+            data["homework_deadline"] = datetime.fromisoformat(data["homework_deadline"].replace("Z", "+00:00")).replace(tzinfo=None)
+        except: pass
+        
+    session = await crud_training.create_course_session(db, data)
+    return {"status": "ok", "id": session.id}
+
+@app.get("/api/v1/training/courses/{course_id}/members")
+async def get_course_members(course_id: str, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+        
+    members = await crud_training.get_members_by_course(db, course_id)
+    result = []
+    for m in members:
+        user = await crud_user.get_user(db, m.user_id)
+        if user:
+            result.append({
+                "userId": user.id,
+                "facebookId": user.facebook_id,
+                "name": user.full_name
+            })
+    return result
+
+@app.post("/api/v1/training/courses/{course_id}/members")
+async def add_course_member(course_id: str, payload: dict, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+    
+    user_id = payload.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="userId is required")
+        
+    await crud_training.add_member_to_course(db, course_id, user_id)
+    return {"status": "ok"}
+
+@app.delete("/api/v1/training/courses/{course_id}/members/{user_id}")
+async def remove_course_member(course_id: str, user_id: str, db: AsyncSession = Depends(get_db), token_payload: dict = Depends(verify_token)):
+    if token_payload.get("role") not in ["admin", "mentor"]:
+        raise HTTPException(status_code=403, detail="Admin/Mentor only")
+        
+    await crud_training.remove_member_from_course(db, course_id, user_id)
+    return {"status": "ok"}
 
 # ------------------------------------------------------------------
 # Static Files & React Router Catch-All
